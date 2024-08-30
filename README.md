@@ -36,7 +36,7 @@ A simple web scraper that allows you to download images from specified URLs via 
 4. **Start the Local Server**
    Run the local server to access the web interface:
    ```
-   python app.py
+   python local_server.py
    ```
 
 5. **Access the Web Interface**
@@ -48,7 +48,7 @@ A simple web scraper that allows you to download images from specified URLs via 
 ## Usage
 
 1. Enter the URL you want to scrape images from in the web interface.
-2. Click the "Scrape" button to download the images to the designated directory.
+2. Click the "Download" button to download the images to the designated directory.
 
 ## Contributing
 
