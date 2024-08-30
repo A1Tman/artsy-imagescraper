@@ -46,9 +46,9 @@ A simple web scraper that allows you to download images from specified URLs via 
    ```
 
 6. **Alternatively, run the GUI version:**
-```
-py .\scraper_gui.py
-```
+   ```
+   py .\scraper_gui.py
+   ```
 
 ## Usage
 
