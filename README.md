@@ -45,6 +45,11 @@ A simple web scraper that allows you to download images from specified URLs via 
    http://127.0.0.1:8000/
    ```
 
+6. **Alternatively, run the GUI version:**
+```
+py .\scraper_gui.py
+```
+
 ## Usage
 
 1. Enter the URL you want to scrape images from in the web interface.
