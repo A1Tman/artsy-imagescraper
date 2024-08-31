@@ -21,7 +21,7 @@ A simple web scraper that allows you to download images from specified URLs via 
    cd artsy-imagescraper
    ```
 
-2. **Install Dependencies**.
+2. **Install Dependencies**.<br>
    Install the required packages listed in `requirements.txt`:
    ```
    pip install -r requirements.txt
