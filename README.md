@@ -66,6 +66,6 @@ If you'd like to contribute to this project, please follow these steps:
 5. Open a Pull Request
 
 ## License
-This project is licensed under the MIT License. See the LICENSE file for details.
+This project is licensed under the MIT License. See the [LICENSE](https://github.com/A1Tman/artsy-imagescraper/blob/main/LICENSE) file for details.
 
 Project Link: [https://github.com/A1Tman/artsy-imagescraper](https://github.com/A1Tman/artsy-imagescraper)
