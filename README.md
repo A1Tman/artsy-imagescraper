@@ -1,4 +1,4 @@
-# Web Scraper Interface
+# Artsy Image Scraper
 
 A simple web scraper that allows you to download images from specified URLs via a local web interface. It uses `selenium`, `beautifulsoup4`, and a local server to interact with the scraper through a web page.
 
