@@ -15,37 +15,37 @@ A simple web scraper that allows you to download images from specified URLs via 
 
 ## Setup Instructions
 
-1. **Clone the Repository**
+1. **Clone the Repository**.
    ```
    git clone https://github.com/A1Tman/artsy-imagescraper.git
    cd artsy-imagescraper
    ```
 
-2. **Install Dependencies**
+2. **Install Dependencies**.
    Install the required packages listed in `requirements.txt`:
    ```
    pip install -r requirements.txt
    ```
 
-3. **Run the Auto Update Script**
+3. **Run the Auto Update Script**.<br>
    Ensure all dependencies are up to date:
    ```
    python auto_update.py
    ```
 
-4. **Start the Local Server**
+4. **Start the Local Server**.<br>
    Run the local server to access the web interface:
    ```
    python local_server.py
    ```
 
-5. **Access the Web Interface**
+5. **Access the Web Interface**.<br>
    The server will automatically open your default web browser to the web interface at:
    ```
    http://127.0.0.1:8000/
    ```
 
-6. **Alternatively, run the GUI version:**
+6. **Alternatively, run the GUI version:**.<br>
    ```
    py .\scraper_gui.py
    ```
