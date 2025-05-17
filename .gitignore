@@ -1,0 +1,43 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+**/__pycache__/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Project specific
+Scraped/
+Update Logs/
+*.spec
+*.exe
+*.log
+
+# Playground directory - appears to be for testing
+Playground/
+
+# Cache directories
+.pytest_cache/
+.coverage
+htmlcov/
+
+# User-specific files that may contain sensitive data
+scraper_history.txt
+
+# Exclude Workspace directory (older version of project)
+Workspace/
