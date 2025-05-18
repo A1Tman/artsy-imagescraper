@@ -28,7 +28,7 @@ Update Logs/
 *.exe
 *.log
 
-# Playground directory - appears to be for testing
+# Playground directory
 Playground/
 
 # Cache directories
