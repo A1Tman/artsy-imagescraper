@@ -2,17 +2,19 @@ import subprocess
 import sys
 from datetime import datetime
 import os
+from pathlib import Path
 
 def update_packages():
-    log_dir = "Update Logs"
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    log_file = os.path.join(log_dir, datetime.now().strftime("update_log_%Y-%m-%d_%H-%M-%S.txt"))
+    base_dir = Path(__file__).resolve().parent
+    log_dir = base_dir / "Update Logs"
+    log_dir.mkdir(exist_ok=True)
+    log_file = log_dir / datetime.now().strftime("update_log_%Y-%m-%d_%H-%M-%S.txt")
     
     with open(log_file, "a") as log:
         log.write(f"Update started at {datetime.now()}\n\n")
                 
-        with open("requirements.txt", "r") as file:
+        requirements_path = base_dir / "requirements.txt"
+        with open(requirements_path, "r") as file:
             packages = file.readlines()
 
         for package in packages:

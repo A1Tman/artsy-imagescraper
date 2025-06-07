@@ -23,12 +23,10 @@ def scrape_images(url):
     # Extract the image name from the URL
     image_name = url.split("/artwork/")[1]
     safe_image_name = sanitize_path_component(image_name)
+    base_dir = Path(__file__).resolve().parent
     # Directory name to save the images
-    directory_name = "Scraped"
-    base_path = Path(directory_name).resolve()
-    # Create a directory if it doesn't exist
-    if not os.path.exists(directory_name):
-        os.makedirs(directory_name)
+    base_path = (base_dir / "Scraped").resolve()
+    base_path.mkdir(exist_ok=True)
     # Selenium setup with webdriver_manager to automatically manage the ChromeDriver
     options = Options()
     options.add_argument('--ignore-certificate-errors')
@@ -60,9 +58,9 @@ def scrape_images(url):
                 unique_urls.add(modified_url)
     # Download the unique images
     num_images_downloaded = 0
-    for url in unique_urls:
+    for img_url in unique_urls:
         try:
-            file_extension = os.path.splitext(urlparse(url).path)[1]
+            file_extension = os.path.splitext(urlparse(img_url).path)[1]
             safe_extension = sanitize_path_component(file_extension)
             
             filename = f"{safe_image_name}_{num_images_downloaded}.{safe_extension.lstrip('.')}"
@@ -72,13 +70,13 @@ def scrape_images(url):
                 print(f"Skipping suspicious path: {filename}")
                 continue
             
-            response = requests.get(url)
+            response = requests.get(img_url)
             response.raise_for_status()
             with open(image_path, "wb") as file:
                 file.write(response.content)
             num_images_downloaded += 1
         except requests.exceptions.RequestException as e:
-            print(f"Error downloading image: {url}")
+            print(f"Error downloading image: {img_url}")
             print(f"Error details: {str(e)}")
     # Close the webdriver
     driver.quit()

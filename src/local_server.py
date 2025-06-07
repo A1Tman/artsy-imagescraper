@@ -2,9 +2,12 @@ import http.server
 import socketserver
 import urllib.parse
 import webbrowser
+from pathlib import Path
 from io import StringIO
 from scraper import scrape_images
-from auto_update import update_packages  
+from auto_update import update_packages
+
+BASE_DIR = Path(__file__).resolve().parent
 
 class MyHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
@@ -12,7 +15,8 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
-            with open('scraper_interface.html', 'rb') as file:
+            interface_path = BASE_DIR / 'scraper_interface.html'
+            with open(interface_path, 'rb') as file:
                 self.wfile.write(file.read())
         elif self.path == '/update':
             self.send_response(200)
@@ -42,7 +46,8 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
 
             # Read the HTML file
-            with open('scraper_interface.html', 'r') as file:
+            interface_path = BASE_DIR / 'scraper_interface.html'
+            with open(interface_path, 'r') as file:
                 html_content = file.read()
 
             # Insert the result into the HTML

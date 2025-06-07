@@ -24,19 +24,19 @@ A simple web scraper that allows you to download images from specified URLs via 
 2. **Install Dependencies**.<br>
    Install the required packages listed in `requirements.txt`:
    ```
-   pip install -r requirements.txt
+   pip install -r src/requirements.txt
    ```
 
 3. **Run the Auto Update Script**.<br>
    Ensure all dependencies are up to date:
    ```
-   python auto_update.py
+   python src/auto_update.py
    ```
 
 4. **Start the Local Server**.<br>
    Run the local server to access the web interface:
    ```
-   python local_server.py
+   python src/local_server.py
    ```
 
 5. **Access the Web Interface**.<br>
@@ -47,7 +47,7 @@ A simple web scraper that allows you to download images from specified URLs via 
 
 6. **Alternatively, run the GUI version:**.<br>
    ```
-   py .\scraper_gui.py
+   python src/scraper_gui.py
    ```
 
 ## Usage
