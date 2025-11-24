@@ -30,6 +30,16 @@ PROG_VALUE = 'value'
 PROG_PERCENTAGE = 'percentage'
 PROG_MESSAGE = 'message'
 
+# UI Constants
+WINDOW_WIDTH = 900
+WINDOW_HEIGHT = 700
+TITLE_FONT_SIZE = 22
+HEADING_FONT_SIZE = 11
+NORMAL_FONT_SIZE = 10
+SMALL_FONT_SIZE = 9
+STATUS_TEXT_MAX_LENGTH = 100
+FILENAME_MAX_LENGTH = 100
+
 class WorkerSignals(QObject):
     """
     Defines the signals available from the worker thread.
@@ -220,48 +230,48 @@ class ImageScraperApp(QMainWindow):
 
     def initUI(self) -> None:
         self.setWindowTitle('Universal Image Scraper')
-        self.setGeometry(100, 100, 900, 700) # Increased height for better layout
+        self.setGeometry(100, 100, WINDOW_WIDTH, WINDOW_HEIGHT)
 
         main_layout = QVBoxLayout()
-        main_layout.setSpacing(10) # Adjusted spacing
-        main_layout.setContentsMargins(15, 15, 15, 15) # Adjusted margins
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(15, 15, 15, 15)
 
         # Title
         title_label = QLabel('Universal Image Scraper')
         title_label.setAlignment(Qt.AlignCenter)
-        title_label.setFont(QFont('Arial', 22, QFont.Bold)) # Slightly smaller
+        title_label.setFont(QFont('Arial', TITLE_FONT_SIZE, QFont.Bold))
         title_label.setStyleSheet("color: #2C3E50; margin-bottom: 8px;")
         main_layout.addWidget(title_label)
 
         # Description
         desc_label = QLabel('Download and organize artwork from various websites')
         desc_label.setAlignment(Qt.AlignCenter)
-        desc_label.setFont(QFont('Arial', 11)) # Slightly smaller
+        desc_label.setFont(QFont('Arial', HEADING_FONT_SIZE))
         desc_label.setStyleSheet("color: #7F8C8D; margin-bottom: 15px;")
         main_layout.addWidget(desc_label)
 
         # URL Input Group
         url_group = QGroupBox("Website URL")
-        url_group.setFont(QFont('Arial', 10)) # Consistent font size
+        url_group.setFont(QFont('Arial', NORMAL_FONT_SIZE))
         url_layout = QVBoxLayout()
         url_layout.setSpacing(5)
 
         url_examples_label = QLabel("Example URLs:")
-        url_examples_label.setFont(QFont('Arial', 9))
+        url_examples_label.setFont(QFont('Arial', SMALL_FONT_SIZE))
         url_layout.addWidget(url_examples_label)
 
         self.url_examples = QComboBox()
-        self.url_examples.setFont(QFont('Arial', 10))
+        self.url_examples.setFont(QFont('Arial', NORMAL_FONT_SIZE))
         self.url_examples.addItem("Select an example...")
         self.url_examples.addItem("Artsy: https://www.artsy.net/artwork/ed-ruscha-history-kids-236")
         self.url_examples.addItem("Artsy: https://www.artsy.net/artwork/shepard-fairey-shepard-fairey-screenprint-opt-art-green-gradient-street-contemporary-art-obey-giant")
         self.url_examples.addItem("Artsy: https://www.artsy.net/artwork/frank-stella-homage-unique-signed-paper-collage-warmly-inscribed-to-european-curator")
         self.url_examples.currentIndexChanged.connect(self.on_example_selected)
         url_layout.addWidget(self.url_examples)
-        
+
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText('Enter URL (e.g., https://www.example.com/artwork/title)')
-        self.url_input.setFont(QFont('Arial', 10))
+        self.url_input.setFont(QFont('Arial', NORMAL_FONT_SIZE))
         self.url_input.setStyleSheet("QLineEdit {padding: 10px; border: 1px solid #BDC3C7; border-radius: 4px;} QLineEdit:focus {border: 1px solid #3498DB;}")
         self.url_input.textChanged.connect(self.validate_url_input_live) # Live validation
         url_layout.addWidget(self.url_input)
@@ -460,13 +470,14 @@ class ImageScraperApp(QMainWindow):
             return False
 
     def on_example_selected(self, index: int) -> None:
-        if index > 0: 
+        if index > 0:
             example_text = self.url_examples.currentText()
             url_part = example_text.split("Artsy: ", 1)[1] if "Artsy: " in example_text else example_text
             self.url_input.setText(url_part.strip())
             self.validate_url_input_live() # Validate after setting example
 
-    def browse_directory(self):
+    def browse_directory(self) -> None:
+        """Open file dialog to select save directory and update settings."""
         current_dir = self.save_dir_input.text()
         if not os.path.isdir(current_dir): # If current text is not a dir, start from home
             current_dir = os.path.expanduser("~")
@@ -476,17 +487,18 @@ class ImageScraperApp(QMainWindow):
             self.save_dir_input.setText(directory)
             self.settings["last_save_dir"] = directory
             self.save_settings()
-            
-    def clear_fields(self):
+
+    def clear_fields(self) -> None:
+        """Clear URL input and reset UI to initial state."""
         self.url_input.clear()
-        # self.log_output.clear() # Keep logs unless explicitly cleared by user action
         self.status_label.setText('Ready')
         self.url_examples.setCurrentIndex(0)
         self.validate_url_input_live()
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(False)
-        
-    def open_output_folder(self):
+
+    def open_output_folder(self) -> None:
+        """Open the selected output folder in system file explorer."""
         path = self.save_dir_input.text()
         if not path:
             QMessageBox.information(self, "No Folder Specified", "Please select a save directory first.")
@@ -505,26 +517,25 @@ class ImageScraperApp(QMainWindow):
             QMessageBox.warning(self, "Folder Not Found", 
                                 f"The folder does not exist or is not a directory:\n{path}")
         
-    def add_log_message(self, message: str, timestamp: bool = True):
+    def add_log_message(self, message: str, timestamp: bool = True) -> None:
         now = datetime.now().strftime("%H:%M:%S") if timestamp else ""
         prefix = f"[{now}] " if timestamp else ""
         self.log_output.append(f"{prefix}{message}")
         self.log_output.moveCursor(QTextCursor.End)
-        
-    def add_to_history(self, url: str, count: int):
+
+    def add_to_history(self, url: str, count: int) -> None:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         item_text = f"{timestamp} - {url} ({count} images)"
         self.history_list.insertItem(0, item_text)
         self.save_history()
 
-    def _get_history_file_path(self):
+    def _get_history_file_path(self) -> str:
         app_name = "ImageScraper"
-        # app_author = "ImageScraperApp" # Not needed if using only app_name for appdirs
-        data_dir = appdirs.user_data_dir(app_name) # Simpler call
+        data_dir = appdirs.user_data_dir(app_name)
         os.makedirs(data_dir, exist_ok=True)
-        return os.path.join(data_dir, 'scraper_history.json') # Changed to JSON
-        
-    def save_history(self):
+        return os.path.join(data_dir, 'scraper_history.json')
+
+    def save_history(self) -> None:
         history_file = self._get_history_file_path()
         history_data = []
         for i in range(self.history_list.count()):
@@ -534,8 +545,8 @@ class ImageScraperApp(QMainWindow):
                 json.dump(history_data, f, indent=4)
         except Exception as e:
             self.add_log_message(f"Error saving history: {str(e)}")
-        
-    def load_history(self):
+
+    def load_history(self) -> None:
         history_file = self._get_history_file_path()
         try:
             if os.path.exists(history_file):
@@ -552,8 +563,8 @@ class ImageScraperApp(QMainWindow):
             self.add_log_message(f"Error decoding history file: {history_file}. It might be corrupted.")
         except Exception as e:
             self.add_log_message(f"Error loading history: {str(e)}")
-        
-    def clear_history(self):
+
+    def clear_history(self) -> None:
         confirm = QMessageBox.question(
             self, "Clear History", "Are you sure you want to clear the entire history?",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No # Default to No
@@ -562,8 +573,8 @@ class ImageScraperApp(QMainWindow):
             self.history_list.clear()
             self.save_history() # This will save an empty list
             self.add_log_message("History cleared.")
-        
-    def reuse_selected_url(self):
+
+    def reuse_selected_url(self) -> None:
         selected_items = self.history_list.selectedItems()
         if selected_items:
             item_text = selected_items[0].text()
@@ -577,7 +588,8 @@ class ImageScraperApp(QMainWindow):
             else:
                 self.add_log_message("Could not parse URL from selected history item.")
     
-    def update_packages(self):
+    def update_packages(self) -> None:
+        """Check for and update required Python packages in background thread."""
         self.progress_bar.setRange(0,0) # Indeterminate for package updates
         self.progress_bar.setVisible(True)
         self.status_label.setText('Checking/Updating packages...')
@@ -587,7 +599,7 @@ class ImageScraperApp(QMainWindow):
         self.log_output.clear()
         self.add_log_message("Starting package update process...")
         self.active_operation = "updating"
-        self.tab_widget.setCurrentIndex(0) 
+        self.tab_widget.setCurrentIndex(0)
 
         self.update_thread = UpdatePackagesThread()
         self.update_thread.signals.progress.connect(self.update_ui_progress)
@@ -606,18 +618,18 @@ class ImageScraperApp(QMainWindow):
                 self.progress_bar.setValue(int(prog_value))
                 self.status_label.setText(f"Scraping: {int(prog_value)}%")
             elif prog_type == PROG_MESSAGE:
-                self.status_label.setText(str(prog_value)[:100]) # Truncate long messages for status
+                self.status_label.setText(str(prog_value)[:STATUS_TEXT_MAX_LENGTH])
                 self.add_log_message(str(prog_value))
             else:
                 self.add_log_message(f"Unknown progress data: {str(progress_update)}")
         elif isinstance(progress_update, str):
             # Handle string progress updates (used by package update thread)
             self.add_log_message(progress_update)
-            self.status_label.setText(progress_update[:100])
+            self.status_label.setText(progress_update[:STATUS_TEXT_MAX_LENGTH])
         else:
             self.add_log_message(f"Unknown progress type: {str(progress_update)}")
         
-    def operation_common_finish_ui(self):
+    def operation_common_finish_ui(self) -> None:
         self.start_button.setEnabled(True)
         self.update_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
@@ -625,14 +637,18 @@ class ImageScraperApp(QMainWindow):
         self.progress_bar.setValue(0) # Reset progress bar
         self.active_operation = None
 
-    def update_finished(self, count: int):
+    def update_finished(self, count: int) -> None:
         final_message = f'Package check complete. {count} packages processed.'
         self.status_label.setText(final_message)
         self.add_log_message(f"\nPackage update process finished! {count} packages were processed for update/install.", timestamp=False)
         self.operation_common_finish_ui()
         QMessageBox.information(self, "Update Complete", final_message)
-        
-    def start_scraping(self):
+
+    def start_scraping(self) -> None:
+        """
+        Start the image scraping process in a background thread.
+        Validates paths and creates scraper thread with progress callbacks.
+        """
         url = self.url_input.text().strip()
         save_dir = self.save_dir_input.text().strip()
 
@@ -641,7 +657,19 @@ class ImageScraperApp(QMainWindow):
         if not save_dir:
             QMessageBox.warning(self, "Input Error", "Please select or enter a directory to save images.")
             return
-        if not os.path.isdir(save_dir): # Check if save_dir is an actual directory
+
+        # Validate and normalize the path to prevent path traversal attacks
+        try:
+            save_dir = os.path.abspath(os.path.normpath(save_dir))
+            # Ensure the path doesn't contain suspicious patterns
+            if ".." in save_dir:
+                QMessageBox.warning(self, "Security Error", "Invalid path: Path traversal patterns are not allowed.")
+                return
+        except Exception as e:
+            QMessageBox.critical(self, "Path Error", f"Invalid directory path:\n{e}")
+            return
+
+        if not os.path.isdir(save_dir):
             try:
                 os.makedirs(save_dir, exist_ok=True)
                 self.add_log_message(f"Created save directory: {save_dir}")
@@ -677,7 +705,7 @@ class ImageScraperApp(QMainWindow):
         self.scraper_thread.daemon = True
         self.scraper_thread.start()
         
-    def scraping_finished(self, count: int):
+    def scraping_finished(self, count: int) -> None:
         final_message = f'Scraping complete! Downloaded {count} images.'
         self.status_label.setText(final_message)
         self.add_log_message(f"\nScraping completed successfully! Total images downloaded: {count}", timestamp=False)
@@ -685,15 +713,15 @@ class ImageScraperApp(QMainWindow):
             self.add_to_history(self.url_input.text().strip(), count)
         self.operation_common_finish_ui()
         QMessageBox.information(self, "Scraping Complete", f"{final_message}\nSaved to: {self.save_dir_input.text()}")
-        
-    def operation_error(self, error_message: str):
+
+    def operation_error(self, error_message: str) -> None:
         op_name = self.active_operation if self.active_operation else "Operation"
         self.status_label.setText(f'Error during {op_name}!')
         self.add_log_message(f"\nERROR during {op_name}: {error_message}", timestamp=False)
         self.operation_common_finish_ui()
         QMessageBox.critical(self, f"{op_name.capitalize()} Error", f"An error occurred:\n\n{error_message}")
 
-    def cancel_operation(self):
+    def cancel_operation(self) -> None:
         if self.active_operation == "scraping" and self.scraper_thread and self.scraper_thread.is_alive():
             self.scraper_thread.request_cancel()
             self.add_log_message("Cancellation requested for scraping...")
@@ -709,10 +737,10 @@ class ImageScraperApp(QMainWindow):
         self.cancel_button.setEnabled(False) # Disable after requesting
         # The thread itself will signal finish/error, which will re-enable buttons
 
-def main():
+def main() -> None:
+    """Main application entry point."""
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
-    # app.setWindowIcon(QIcon("path/to/your/icon.png")) # Optional: Add an icon
     window = ImageScraperApp()
     window.show()
     sys.exit(app.exec_())
