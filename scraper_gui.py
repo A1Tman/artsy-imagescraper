@@ -9,10 +9,10 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout
 from PyQt5.QtGui import QFont, QIcon, QTextCursor
 from PyQt5.QtCore import Qt, pyqtSignal, QObject, QTimer
 import json
-import re # Added for reuse_selected_url
-import copy # Added for deepcopy
+import re
+import copy
 from datetime import datetime
-import appdirs # Added for user data directory
+import appdirs
 from urllib.parse import urlparse
 from typing import Any, Dict, Optional
 
@@ -22,7 +22,7 @@ from improved_scraper import scrape_images
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 if _MODULE_DIR not in sys.path:
     sys.path.insert(0, _MODULE_DIR)
-from config import ScraperConfig # Import ScraperConfig
+from config import ScraperConfig
 
 # Progress update dictionary keys and values
 PROG_TYPE = 'type'
@@ -46,7 +46,7 @@ class WorkerSignals(QObject):
     """
     finished = pyqtSignal(int)
     error = pyqtSignal(str)
-    progress = pyqtSignal(object)  # Changed to handle dicts for progress type
+    progress = pyqtSignal(object)
 
 class UpdatePackagesThread(threading.Thread):
     """
@@ -177,7 +177,7 @@ class ScraperThread(threading.Thread):
     def __init__(self, url: str, config: ScraperConfig) -> None:
         super().__init__()
         self.url: str = url
-        self.config: ScraperConfig = config # Store the config (should already have output_directory set)
+        self.config: ScraperConfig = config
         self.signals: WorkerSignals = WorkerSignals()
         self.cancel_requested: bool = False
 
@@ -196,12 +196,10 @@ class ScraperThread(threading.Thread):
 
     def run(self) -> None:
         try:
-            # The config already has the correct output_directory set in __init__
-            # No need to mutate it here
             result = scrape_images(
                 url=self.url,
-                config_input=self.config, # Pass the ScraperConfig object
-                verbose=False, # GUI handles progress messages, so scraper's own verbose can be False
+                config_input=self.config,
+                verbose=False,
                 progress_callback=self.handle_scraper_progress
             )
             if not self.cancel_requested:
@@ -652,16 +650,12 @@ class ImageScraperApp(QMainWindow):
         url = self.url_input.text().strip()
         save_dir = self.save_dir_input.text().strip()
 
-        # URL validation is handled by live validation which disables the start button
-        # No need to check again here
         if not save_dir:
             QMessageBox.warning(self, "Input Error", "Please select or enter a directory to save images.")
             return
 
-        # Validate and normalize the path to prevent path traversal attacks
         try:
             save_dir = os.path.abspath(os.path.normpath(save_dir))
-            # Ensure the path doesn't contain suspicious patterns
             if ".." in save_dir:
                 QMessageBox.warning(self, "Security Error", "Invalid path: Path traversal patterns are not allowed.")
                 return
@@ -693,8 +687,6 @@ class ImageScraperApp(QMainWindow):
         self.active_operation = "scraping"
         self.tab_widget.setCurrentIndex(0)
 
-        # Create a deep copy of the app's config to avoid mutating the original
-        # and set the output directory for this specific scraping run
         thread_config = copy.deepcopy(self.scraper_config)
         thread_config.output_directory = save_dir
 
