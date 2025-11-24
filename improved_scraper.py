@@ -1,5 +1,15 @@
 import os
 import sys
+import re
+import time
+import requests
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from bs4 import BeautifulSoup
+from urllib.parse import unquote, urlparse
+from typing import Optional, Union, Any, Callable, Dict
 
 # Ensure the script's directory is in sys.path for local module resolution.
 # This can help linters like Pylance find 'config.py' and 'resources.py'
@@ -7,26 +17,8 @@ import sys
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
-import requests # Still needed for type hints and potential direct use if session fails
-import re
-import time
-from selenium import webdriver # Still needed for type hints (driver type)
-# from selenium.webdriver.chrome.service import Service # Encapsulated in ResourceManager
-# from selenium.webdriver.chrome.options import Options # Encapsulated in ResourceManager
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-# from webdriver_manager.chrome import ChromeDriverManager # Encapsulated in ResourceManager
-from bs4 import BeautifulSoup
-from urllib.parse import unquote, urlparse
-from typing import Optional, Union, Any, Callable, Dict # Added Any for progress_callback type, Dict for type hint
 
 # Import the configuration and resource management classes
-# Use explicit imports with the script directory to help Pylance resolve modules
-# Ensure the script's directory is in sys.path for local module resolution.
-_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-if _SCRIPT_DIR not in sys.path:
-    sys.path.insert(0, _SCRIPT_DIR)
 from config import ScraperConfig
 from resources import download_manager, ResourceManager
 
@@ -298,7 +290,11 @@ def scrape_images(url: str, config_input: Optional[Union[ScraperConfig, str]] = 
                 if verbose: print(msg)
                 if progress_callback: progress_callback({'type': 'message', 'value': msg})
                 html = driver.page_source
-                soup = BeautifulSoup(html, "html.parser")
+                # Try to use lxml parser for better performance, fall back to html.parser
+                try:
+                    soup = BeautifulSoup(html, "lxml")
+                except:
+                    soup = BeautifulSoup(html, "html.parser")
                 
                 unique_urls = extract_images_from_page(soup, url, site_type, config, verbose)
                 msg = f"Found {len(unique_urls)} potential image URLs."

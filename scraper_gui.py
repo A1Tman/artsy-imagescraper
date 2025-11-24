@@ -14,18 +14,15 @@ import copy # Added for deepcopy
 from datetime import datetime
 import appdirs # Added for user data directory
 from urllib.parse import urlparse
+from typing import Any, Dict, Optional
 
 # Import the unified scraper module
 from improved_scraper import scrape_images
 # Import config using absolute import instead of relative import
-import os
-import sys
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 if _MODULE_DIR not in sys.path:
     sys.path.insert(0, _MODULE_DIR)
 from config import ScraperConfig # Import ScraperConfig
-
-from typing import Any, Dict, Optional
 
 # Progress update dictionary keys and values
 PROG_TYPE = 'type'
@@ -162,15 +159,15 @@ class UpdatePackagesThread(threading.Thread):
                     if line.startswith("Version:"):
                         return line.split(":", 1)[1].strip()
             return None
-        except Exception:
+        except (subprocess.SubprocessError, OSError):
+            # Handle subprocess and OS errors gracefully
             return None
 
 class ScraperThread(threading.Thread):
-    def __init__(self, url: str, save_dir: str, config: ScraperConfig) -> None: # Added config
+    def __init__(self, url: str, config: ScraperConfig) -> None:
         super().__init__()
         self.url: str = url
-        self.save_dir: str = save_dir # save_dir is still needed for the ScraperConfig override
-        self.config: ScraperConfig = config # Store the config
+        self.config: ScraperConfig = config # Store the config (should already have output_directory set)
         self.signals: WorkerSignals = WorkerSignals()
         self.cancel_requested: bool = False
 
@@ -189,13 +186,11 @@ class ScraperThread(threading.Thread):
 
     def run(self) -> None:
         try:
-            # Update the config's output_directory for this specific run
-            current_run_config = self.config
-            current_run_config.output_directory = self.save_dir
-
+            # The config already has the correct output_directory set in __init__
+            # No need to mutate it here
             result = scrape_images(
                 url=self.url,
-                config_input=current_run_config, # Pass the ScraperConfig object
+                config_input=self.config, # Pass the ScraperConfig object
                 verbose=False, # GUI handles progress messages, so scraper's own verbose can be False
                 progress_callback=self.handle_scraper_progress
             )
@@ -607,28 +602,18 @@ class ImageScraperApp(QMainWindow):
             prog_value = progress_update.get(PROG_VALUE)
 
             if prog_type == PROG_PERCENTAGE:
-                if self.progress_bar.minimum() != 0 or self.progress_bar.maximum() != 100: # Ensure range is 0-100 for percentage
-                    self.progress_bar.setRange(0, 100)
+                # Progress bar range is already set to 0-100 in start_scraping
                 self.progress_bar.setValue(int(prog_value))
                 self.status_label.setText(f"Scraping: {int(prog_value)}%")
-                # self.add_log_message(f"Progress: {int(prog_value)}%", timestamp=False) # Avoid too many log entries for percentage
             elif prog_type == PROG_MESSAGE:
                 self.status_label.setText(str(prog_value)[:100]) # Truncate long messages for status
                 self.add_log_message(str(prog_value))
-                if self.active_operation == "scraping" and self.progress_bar.minimum() == 0 and self.progress_bar.maximum() == 0:
-                    # If scraping started and bar was indeterminate, switch to determinate if not already
-                     pass # Keep as is, percentage update will fix it
-                elif self.active_operation == "updating": # For updates, keep it indeterminate
-                    if self.progress_bar.minimum() !=0 or self.progress_bar.maximum() !=0:
-                        self.progress_bar.setRange(0,0)
             else:
                 self.add_log_message(f"Unknown progress data: {str(progress_update)}")
         elif isinstance(progress_update, str):
+            # Handle string progress updates (used by package update thread)
             self.add_log_message(progress_update)
             self.status_label.setText(progress_update[:100])
-            if self.active_operation == "updating": # Ensure indeterminate for package updates
-                 if self.progress_bar.minimum() !=0 or self.progress_bar.maximum() !=0:
-                        self.progress_bar.setRange(0,0)
         else:
             self.add_log_message(f"Unknown progress type: {str(progress_update)}")
         
@@ -651,9 +636,8 @@ class ImageScraperApp(QMainWindow):
         url = self.url_input.text().strip()
         save_dir = self.save_dir_input.text().strip()
 
-        if not self.is_valid_url(url): # Relies on live validation already disabling button
-            QMessageBox.warning(self, "Input Error", "Please enter a valid URL.")
-            return
+        # URL validation is handled by live validation which disables the start button
+        # No need to check again here
         if not save_dir:
             QMessageBox.warning(self, "Input Error", "Please select or enter a directory to save images.")
             return
@@ -681,36 +665,12 @@ class ImageScraperApp(QMainWindow):
         self.active_operation = "scraping"
         self.tab_widget.setCurrentIndex(0)
 
-        # Create a copy of the app's base config and override output_directory for this run
-        # This ensures the main self.scraper_config isn't altered by GUI input for one run.
-        # A deepcopy might be better if config had more complex mutable fields.
-        # For now, creating a new instance and copying relevant fields or just overriding output_directory is fine.
-        
-        # Create a new config instance for this specific run, seeded from the app's config
-        # then override the output directory.
-        # This is better than modifying self.scraper_config directly.
-        run_specific_config = ScraperConfig.load() # Load defaults
-        # Copy attributes from self.scraper_config to run_specific_config if desired
-        # For example, if self.scraper_config could be modified by a settings UI:
-        # for field_name in run_specific_config.__dataclass_fields__:
-        #    if hasattr(self.scraper_config, field_name):
-        #        setattr(run_specific_config, field_name, getattr(self.scraper_config, field_name))
-        # For now, assume self.scraper_config holds the base defaults and we only override output_directory
-        
-        # Simpler: just use the app's loaded config and modify its output_directory for the thread.
-        # The scrape_images function itself will use this.
-        # The ScraperConfig object is mutable, so changes here will be seen by the thread.
-        # To avoid modifying the main app config, we should pass a copy or a new config.
-        
-        # Let's create a new config instance for the thread, based on the app's current config,
-        # but with the output directory set from the GUI.
-        
-        # Create a new ScraperConfig instance for this run
-        # Initialize it with values from self.scraper_config, then override output_directory
+        # Create a deep copy of the app's config to avoid mutating the original
+        # and set the output directory for this specific scraping run
         thread_config = copy.deepcopy(self.scraper_config)
         thread_config.output_directory = save_dir
 
-        self.scraper_thread = ScraperThread(url, save_dir, thread_config) # Pass the config
+        self.scraper_thread = ScraperThread(url, thread_config)
         self.scraper_thread.signals.progress.connect(self.update_ui_progress)
         self.scraper_thread.signals.finished.connect(self.scraping_finished)
         self.scraper_thread.signals.error.connect(self.operation_error)

@@ -17,6 +17,7 @@ ENV/
 # IDE and editor files
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 .DS_Store
@@ -39,5 +40,7 @@ htmlcov/
 # User-specific files that may contain sensitive data
 scraper_history.txt
 
-# Exclude Workspace directory (older version of project)
+# Exclude archived obsolete files
 Workspace/
+archive/
+archive_old_files.py

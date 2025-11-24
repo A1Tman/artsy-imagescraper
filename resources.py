@@ -2,7 +2,7 @@
 Session and resource management module for the image scraper.
 """
 import os
-import time
+import sys
 import logging
 from contextlib import contextmanager
 from typing import Optional, Callable, Dict, Any, Generator
@@ -14,8 +14,6 @@ from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 
 # Import config using absolute import instead of relative import
-import os
-import sys
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 if _MODULE_DIR not in sys.path:
     sys.path.insert(0, _MODULE_DIR)
