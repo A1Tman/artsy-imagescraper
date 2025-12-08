@@ -37,10 +37,5 @@ Playground/
 .coverage
 htmlcov/
 
-# User-specific files that may contain sensitive data
-scraper_history.txt
-
 # Exclude archived obsolete files
-Workspace/
 archive/
-archive_old_files.py
