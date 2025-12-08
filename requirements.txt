@@ -1,4 +1,7 @@
 selenium
 beautifulsoup4
 requests
-webdriver_manager
+webdriver-manager
+PyQt5
+appdirs
+lxml
