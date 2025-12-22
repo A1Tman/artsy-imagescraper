@@ -40,10 +40,21 @@ class ScraperConfig:
     # Site-specific configurations
     site_configs: Dict[str, Dict[str, Any]] = field(default_factory=lambda: {
         "artsy.net": {
-            "artist_selector": "h2[data-test='artist-name']",
-            "artwork_selector": "h1[data-test='artwork-title']",
-            # "image_container_selector": "div[data-test='artwork-image']", # Example, not used in current scraper logic directly for image extraction
-            "unwanted_image_terms_override": ['universal-footer', 'larger', 'small', 'square', 'source', 'logo', 'icon'] # Artsy specific
+            # Artsy no longer uses data-test attributes consistently, rely on JSON-LD instead
+            "artist_selector": "h2[data-test='artist-name']",  # Fallback only
+            "artwork_selector": "h1[data-test='artwork-title']",  # Fallback only
+            "use_json_ld": True,  # Primary method: extract from JSON-LD structured data
+            "json_ld_selectors": {
+                "artist_path": "creator.name",  # Path in JSON-LD for artist name
+                "artwork_path": "name",  # Path in JSON-LD for artwork title
+                "image_path": "image.url"  # Path in JSON-LD for image URL
+            },
+            # CDN patterns for extracting original image URLs from Artsy's CDN
+            "cdn_patterns": [
+                r'resize_to=fit&src=([^&]+)',  # Extract src parameter from Artsy CDN URLs
+                r'src=([^&]+)'  # Backup pattern
+            ],
+            "unwanted_image_terms_override": ['universal-footer', 'larger', 'small', 'square', 'source', 'logo', 'icon', 'favicon', 'thumbnail']
         }
         # Add other site configs here, e.g.
         # "generic_site.com": { ... }
