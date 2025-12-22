@@ -1,148 +1,130 @@
 # Artsy Image Scraper
 
-A powerful, user-friendly tool for scraping and organizing high-quality artwork images from Artsy.net and other art websites.
+A tool for downloading high-quality artwork images from Artsy.net and other art websites. Automatically organizes downloads by artist and artwork name.
 
-## 🎨 Features
+## Features
 
-### Core Functionality
-- **Smart Artsy Scraping**: Advanced JSON-LD structured data extraction for reliable artist/artwork identification
-- **High-Quality Images**: Automatically extracts original high-resolution images from CDN wrappers
-- **Universal Compatibility**: Works with Artsy.net and generic art websites
-- **Multi-Strategy Extraction**: Falls back gracefully through multiple extraction methods
+- Scrapes images from Artsy.net using JSON-LD structured data for reliable extraction
+- Downloads original high-resolution images (not scaled-down versions)
+- PyQt5 GUI with progress tracking and download history
+- Command-line interface for scripting and automation
+- Configurable settings for different websites
+- Automatic filtering of logos, icons, and thumbnails
 
-### User Experience
-- **Modern GUI Interface**: Clean PyQt5 interface with progress tracking and logging
-- **Automatic Organization**: Images organized by artist name and artwork title
-- **Download History**: Track and reuse previously scraped URLs
-- **Example URLs**: Built-in Artsy examples for easy testing
-- **Package Management**: Built-in dependency checker and updater
-
-### Technical Features
-- **Configurable Settings**: JSON-based configuration for site-specific behavior
-- **Intelligent Resource Management**: Proper browser session handling with cleanup
-- **Error Handling**: Comprehensive error handling with verbose logging options
-- **Image Filtering**: Automatically filters out logos, icons, and thumbnails
-
-## 🚀 Installation
+## Installation
 
 ### Prerequisites
 - Python 3.11 or higher
 - Google Chrome browser (for Selenium WebDriver)
 
-### Setup Steps
+### Setup
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/A1Tman/artsy-imagescraper.git
-   cd artsy-imagescraper
-   ```
+Clone the repository:
+```bash
+git clone https://github.com/A1Tman/artsy-imagescraper.git
+cd artsy-imagescraper
+```
 
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+Install dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-3. **Run the application**
-   ```bash
-   python scraper_gui.py
-   ```
+Run the GUI:
+```bash
+python scraper_gui.py
+```
 
-## 📖 Usage
+## Usage
 
-### GUI Mode (Recommended)
-1. Launch the application: `python scraper_gui.py`
-2. Enter or select an Artsy URL (examples provided in dropdown)
-3. Choose save location (or use default)
+### GUI Mode
+1. Run `python scraper_gui.py`
+2. Enter an Artsy URL or select one from the examples dropdown
+3. Choose where to save the images
 4. Click "Start Scraping"
-5. Monitor progress in the logs tab
-6. Images are saved to: `{save_location}/{artist_name}/{artwork_title}.jpg`
+5. Check the Logs tab to monitor progress
+
+Images are saved to: `{save_location}/{artist_name}/{artwork_title}.jpg`
 
 ### Command-Line Mode
-```bash
-python improved_scraper.py
-```
-- Interactive prompts for URL and save directory
-- Verbose output for debugging
-- Supports custom configuration files
+Run `python improved_scraper.py` for an interactive command-line interface with verbose output.
 
 ### Example URLs
-- `https://www.artsy.net/artwork/ellen-von-unwerth-isabelle`
-- `https://www.artsy.net/artwork/ed-ruscha-history-kids-236`
-- `https://www.artsy.net/artwork/shepard-fairey-shepard-fairey-screenprint-opt-art-green-gradient-street-contemporary-art-obey-giant`
+Try these Artsy artwork pages:
+- https://www.artsy.net/artwork/ellen-von-unwerth-isabelle
+- https://www.artsy.net/artwork/ed-ruscha-history-kids-236
+- https://www.artsy.net/artwork/shepard-fairey-shepard-fairey-screenprint-opt-art-green-gradient-street-contemporary-art-obey-giant
 
-## 🏗️ Project Structure
+## Project Structure
 
 ```
 artsy-imagescraper/
-├── improved_scraper.py    # Core scraping engine with JSON-LD extraction
-├── config.py              # Configuration dataclass with site-specific settings
+├── improved_scraper.py    # Core scraping engine
+├── config.py              # Configuration settings
 ├── resources.py           # Resource management (WebDriver, HTTP sessions)
-├── scraper_gui.py         # PyQt5 GUI application
-├── requirements.txt       # Python dependencies
-└── README.md             # This file
+├── scraper_gui.py         # PyQt5 GUI
+├── requirements.txt       # Dependencies
+└── README.md              # This file
 ```
 
-## 🔧 Configuration
+## Configuration
 
-The scraper uses a configuration system in `config.py` that can be customized:
+Settings are defined in `config.py` and can be customized:
 
 ```python
 config = ScraperConfig(
-    output_directory="Scraped",           # Base output folder
-    browser_headless=True,                # Run browser in background
-    render_wait_time=3,                   # Seconds to wait for JS rendering
-    min_image_size=10000,                 # Minimum image size (bytes)
+    output_directory="Scraped",
+    browser_headless=True,
+    render_wait_time=3,
+    min_image_size=10000,
     # ... more options
 )
 ```
 
-Site-specific configurations are defined in `site_configs` dict for Artsy.net and can be extended for other sites.
+Site-specific configs for Artsy.net are in the `site_configs` dict and can be extended for other sites.
 
-## 🆕 What's New in v2.2
+## What's New in v2.2
 
-### Major Improvements
-- ✅ **JSON-LD Structured Data Extraction**: Primary method for Artsy scraping (most reliable)
-- ✅ **Fixed Image URL Extraction**: Properly extracts original high-res images from Artsy's CDN
-- ✅ **Multi-Strategy Fallback**: JSON-LD → Preload Links → Meta Tags → IMG tags → URL parsing
-- ✅ **Better Error Handling**: Replaced bare `except` clauses with specific exception handling
-- ✅ **Enhanced Type Hints**: Complete type annotations for better IDE support
-- ✅ **Improved Logging**: Verbose mode shows which extraction strategy succeeded
+This version fixes the broken Artsy scraping that wasn't working properly:
 
-### Technical Details
-- New helper functions for JSON-LD parsing and nested value extraction
-- Regex-based CDN URL unwrapping configured per-site
-- BeautifulSoup parsing of structured data from `<script type="application/ld+json">` tags
+- Uses JSON-LD structured data extraction instead of unreliable CSS selectors
+- Actually downloads the original high-res images instead of thumbnails
+- Multi-tier fallback system: JSON-LD → Preload Links → Meta Tags → IMG tags → URL parsing
+- Fixed all the bare except clauses with proper error handling
+- Added type hints everywhere
+- Verbose logging shows which extraction method worked
 
-See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
+Technical changes:
+- Added JSON-LD parsing functions to extract data from `<script type="application/ld+json">` tags
+- Regex-based CDN URL unwrapping to get original image URLs from Artsy's wrapper URLs
+- Better error messages when things go wrong
 
-## 📦 Dependencies
+See [CHANGELOG.md](CHANGELOG.md) for full version history.
 
-- **selenium** - Browser automation for dynamic content
-- **beautifulsoup4** + **lxml** - HTML/XML parsing
-- **requests** - HTTP requests
-- **webdriver-manager** - Automatic ChromeDriver management
-- **PyQt5** - GUI framework
-- **appdirs** - Cross-platform config/data directories
+## Dependencies
 
-## 🐛 Troubleshooting
+- selenium - Browser automation
+- beautifulsoup4 + lxml - HTML parsing
+- requests - HTTP downloads
+- webdriver-manager - ChromeDriver installer
+- PyQt5 - GUI
+- appdirs - Config directories
 
-**Images not downloading from Artsy:**
-- Ensure Chrome browser is installed
-- Check verbose logs for extraction method used
-- Verify URL is an artwork page (`/artwork/` in path)
+## Troubleshooting
+
+**Images not downloading:**
+- Make sure Chrome is installed
+- Check the verbose logs to see what extraction method was used
+- Verify the URL is an artwork page (has `/artwork/` in it)
 
 **GUI won't start:**
-- Verify PyQt5 is installed: `pip install PyQt5`
-- Check Python version is 3.11+
+- Install PyQt5: `pip install PyQt5`
+- Check Python version (needs 3.11+)
 
 **ChromeDriver errors:**
-- The app auto-installs ChromeDriver via webdriver-manager
-- Ensure you have internet connection on first run
+- The app downloads ChromeDriver automatically on first run
+- Make sure you have internet connection
 
-## 📄 License
+## License
 
-This project is for educational purposes. Please respect website terms of service and copyright laws when scraping content.
-
-## 🙏 Acknowledgments
-
-Built with guidance from Claude Code (Anthropic) - v2.2 improvements based on analysis of actual Artsy HTML structure.
+Educational purposes only. Respect website terms of service and copyright laws.
