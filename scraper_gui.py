@@ -497,23 +497,46 @@ class ImageScraperApp(QMainWindow):
 
     def open_output_folder(self) -> None:
         """Open the selected output folder in system file explorer."""
-        path = self.save_dir_input.text()
+        path = self.save_dir_input.text().strip()
         if not path:
             QMessageBox.information(self, "No Folder Specified", "Please select a save directory first.")
             return
-        if os.path.exists(path) and os.path.isdir(path):
-            try:
-                if sys.platform == 'win32':
-                    os.startfile(os.path.normpath(path))
-                elif sys.platform == 'darwin':
-                    subprocess.call(['open', os.path.normpath(path)])
-                else:
-                    subprocess.call(['xdg-open', os.path.normpath(path)])
-            except Exception as e:
-                 QMessageBox.warning(self, "Error Opening Folder", f"Could not open folder: {e}")
-        else:
-            QMessageBox.warning(self, "Folder Not Found", 
-                                f"The folder does not exist or is not a directory:\n{path}")
+
+        # Security: Validate and normalize the path
+        try:
+            path = os.path.abspath(os.path.normpath(path))
+        except Exception as e:
+            QMessageBox.warning(self, "Invalid Path", f"Invalid folder path: {e}")
+            return
+
+        # Security: Verify path exists and is actually a directory
+        if not os.path.exists(path):
+            QMessageBox.warning(self, "Folder Not Found", f"The folder does not exist:\n{path}")
+            return
+
+        if not os.path.isdir(path):
+            QMessageBox.warning(self, "Not a Directory", f"The path is not a directory:\n{path}")
+            return
+
+        # Security: On Windows, verify path doesn't contain special characters that could be exploited
+        if sys.platform == 'win32' and any(char in path for char in ['<', '>', '|', '&', '^']):
+            QMessageBox.warning(self, "Invalid Path", "Path contains invalid characters.")
+            return
+
+        try:
+            if sys.platform == 'win32':
+                # Use os.startfile which is safer on Windows
+                os.startfile(path)
+            elif sys.platform == 'darwin':
+                # macOS: Use list form to prevent shell injection
+                subprocess.run(['open', path], check=True, timeout=5)
+            else:
+                # Linux: Use list form to prevent shell injection
+                subprocess.run(['xdg-open', path], check=True, timeout=5)
+        except subprocess.TimeoutExpired:
+            QMessageBox.warning(self, "Timeout", "Opening folder timed out.")
+        except Exception as e:
+            QMessageBox.warning(self, "Error Opening Folder", f"Could not open folder: {e}")
         
     def add_log_message(self, message: str, timestamp: bool = True) -> None:
         now = datetime.now().strftime("%H:%M:%S") if timestamp else ""
@@ -655,10 +678,33 @@ class ImageScraperApp(QMainWindow):
             return
 
         try:
+            # Normalize and resolve the path to prevent traversal attacks
             save_dir = os.path.abspath(os.path.normpath(save_dir))
-            if ".." in save_dir:
-                QMessageBox.warning(self, "Security Error", "Invalid path: Path traversal patterns are not allowed.")
-                return
+
+            # Security: Ensure the resolved path doesn't escape to system directories
+            # Get user's home directory as a safe base reference
+            user_home = os.path.expanduser("~")
+
+            # Check if path tries to access sensitive system directories
+            forbidden_prefixes = []
+            if sys.platform == 'win32':
+                # Windows: Prevent access to system directories
+                forbidden_prefixes = [
+                    os.path.abspath("C:\\Windows"),
+                    os.path.abspath("C:\\Program Files"),
+                    os.path.abspath("C:\\Program Files (x86)"),
+                ]
+            else:
+                # Unix-like: Prevent access to system directories
+                forbidden_prefixes = ["/bin", "/sbin", "/boot", "/etc", "/sys", "/proc"]
+
+            # Check if path is trying to access forbidden directories
+            for forbidden in forbidden_prefixes:
+                if save_dir.lower().startswith(forbidden.lower()):
+                    QMessageBox.warning(self, "Security Error",
+                                      "Cannot save to system directories.\nPlease choose a location in your user folders.")
+                    return
+
         except Exception as e:
             QMessageBox.critical(self, "Path Error", f"Invalid directory path:\n{e}")
             return

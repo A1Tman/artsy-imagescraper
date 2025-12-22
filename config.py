@@ -18,7 +18,7 @@ class ScraperConfig:
     browser_user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
     browser_incognito: bool = True
     browser_disable_automation: bool = True
-    browser_ignore_cert_errors: bool = True
+    browser_ignore_cert_errors: bool = False  # Security: Only ignore cert errors when explicitly needed
     
     # Timeouts (in seconds)
     page_load_timeout: int = 30 # Not directly used by driver.get, but can be for explicit waits
