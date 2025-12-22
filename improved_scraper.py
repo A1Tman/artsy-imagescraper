@@ -25,9 +25,24 @@ from resources import download_manager, ResourceManager
 
 
 def clean_filename(name: str) -> str:
-    """Convert a string to a valid filename"""
-    name = re.sub(r'[\\/*?:"<>|]', "", name)
+    """Convert a string to a valid filename.
+
+    Removes invalid characters and limits length to 100 characters.
+    Handles Windows NTFS alternate data streams and null bytes.
+
+    Args:
+        name: Original filename string
+
+    Returns:
+        Sanitized filename safe for filesystem use
+    """
+    # Remove filesystem-invalid characters including null bytes
+    name = re.sub(r'[\\/*?:"<>|\x00]', "", name)
+    # Replace whitespace and hyphens with underscores
     name = re.sub(r'[\s-]+', "_", name)
+    # Remove trailing dots and spaces (Windows compatibility)
+    name = name.strip('. ')
+    # Limit length to 100 characters for compatibility
     return name[:100]
 
 
@@ -141,7 +156,11 @@ def extract_artsy_info(url: str, driver: webdriver.Chrome, config: ScraperConfig
         # Strategy 1: Try JSON-LD extraction (most reliable for Artsy)
         if use_json_ld:
             html = driver.page_source
-            soup = BeautifulSoup(html, "lxml" if "lxml" else "html.parser")
+            # Try lxml parser first for better performance, fall back to html.parser
+            try:
+                soup = BeautifulSoup(html, "lxml")
+            except ImportError:
+                soup = BeautifulSoup(html, "html.parser")
             json_ld_data = extract_json_ld_data(soup, verbose)
 
             if json_ld_data:
@@ -266,10 +285,19 @@ def extract_original_image_url(cdn_url: str, config: ScraperConfig, verbose: boo
     return cdn_url
 
 
-def extract_images_from_page(soup, url: str, site_type: str, config: ScraperConfig, driver: Optional[webdriver.Chrome] = None, verbose: bool = False) -> Set[str]:
+def extract_images_from_page(soup: BeautifulSoup, url: str, site_type: str, config: ScraperConfig, driver: Optional[webdriver.Chrome] = None, verbose: bool = False) -> Set[str]:
     """Extract image URLs from the page based on site type and config.
 
-    Returns: Set of image URLs
+    Args:
+        soup: BeautifulSoup object containing parsed HTML
+        url: Source URL being scraped
+        site_type: Type of site ("artsy" or "generic")
+        config: Scraper configuration object
+        driver: Optional Selenium WebDriver instance (unused but kept for API compatibility)
+        verbose: Enable verbose logging
+
+    Returns:
+        Set of image URLs found on the page
     """
     unique_urls = set()
     parsed_url_netloc = urlparse(url).netloc
@@ -351,8 +379,21 @@ def extract_images_from_page(soup, url: str, site_type: str, config: ScraperConf
     return unique_urls
 
 
-def download_images(unique_urls, artist_dir: str, artwork_name: str, config: ScraperConfig, manager: ResourceManager, verbose: bool = False, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None):
-    """Download images using ResourceManager for session and config for settings."""
+def download_images(unique_urls: Set[str], artist_dir: str, artwork_name: str, config: ScraperConfig, manager: ResourceManager, verbose: bool = False, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> int:
+    """Download images using ResourceManager for session and config for settings.
+
+    Args:
+        unique_urls: Set of image URLs to download
+        artist_dir: Directory path where images should be saved
+        artwork_name: Base filename for saved images
+        config: Scraper configuration object
+        manager: ResourceManager instance for HTTP session
+        verbose: Enable verbose logging
+        progress_callback: Optional callback function for progress updates
+
+    Returns:
+        Number of images successfully downloaded
+    """
     num_images_downloaded = 0
     total_to_download = len(unique_urls)
 
@@ -476,7 +517,7 @@ def scrape_images(url: str, config_input: Optional[Union[ScraperConfig, str]] = 
                 # Try to use lxml parser for better performance, fall back to html.parser
                 try:
                     soup = BeautifulSoup(html, "lxml")
-                except:
+                except ImportError:
                     soup = BeautifulSoup(html, "html.parser")
                 
                 unique_urls = extract_images_from_page(soup, url, site_type, config, verbose)
