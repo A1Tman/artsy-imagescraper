@@ -23,6 +23,79 @@ if _SCRIPT_DIR not in sys.path:
 from config import ScraperConfig
 from resources import download_manager, ResourceManager
 
+# ============================================================================
+# Constants
+# ============================================================================
+
+# Filename handling
+FILENAME_MAX_LENGTH = 100
+INVALID_FILENAME_CHARS_PATTERN = r'[\\/*?:"<>|\x00]'
+WHITESPACE_PATTERN = r'[\s-]+'
+
+# HTML parsing
+PRIMARY_HTML_PARSER = "lxml"
+FALLBACK_HTML_PARSER = "html.parser"
+
+# JSON-LD extraction
+JSON_LD_SCRIPT_TYPE = 'application/ld+json'
+JSON_LD_TYPE_KEY = '@type'
+JSON_LD_GRAPH_KEY = '@graph'
+JSON_LD_ARTWORK_TYPE = 'VisualArtwork'
+JSON_LD_UNKNOWN_TYPE = 'unknown'
+
+# Default values for extraction fallbacks
+DEFAULT_ARTIST_NAME = "unknown"
+DEFAULT_ARTWORK_NAME = "artwork"
+
+# Artsy-specific constants
+ARTSY_DOMAIN = "artsy.net"
+ARTSY_ARTWORK_PATH = '/artwork/'
+ARTWORK_SLUG_INDEX = 1
+ARTIST_NAME_WORD_COUNT = 2
+SLUG_PARTS_MIN_FOR_TITLE = 2
+
+# Site type identifiers
+SITE_TYPE_ARTSY = "artsy"
+SITE_TYPE_GENERIC = "generic"
+
+# Generic page extraction
+MIN_HEADING_LEVEL = 1
+MAX_HEADING_LEVEL = 4
+HEADING_WAIT_DIVISOR = 3
+HEADING_MAX_LENGTH = 100
+MIN_HEADINGS_FOR_BOTH = 2
+ARTIST_HEADING_INDEX = 0
+ARTWORK_HEADING_INDEX = 1
+MIN_PATH_PARTS_FOR_ARTWORK = 1
+DOMAIN_PARTS_THRESHOLD = 2
+
+# URL schemes
+HTTP_SCHEME = 'http://'
+HTTPS_SCHEME = 'https://'
+DATA_URI_PREFIX = 'data:image'
+SVG_EXTENSION = '.svg'
+
+# Image content types mapping
+IMAGE_CONTENT_TYPES = {
+    'image/jpeg': '.jpg',
+    'image/png': '.png',
+    'image/gif': '.gif',
+    'image/webp': '.webp',
+    'image/bmp': '.bmp'
+}
+IMAGE_CONTENT_TYPE_PREFIX = 'image/'
+DEFAULT_IMAGE_EXTENSION = '.jpg'
+
+# Progress tracking
+PERCENTAGE_MULTIPLIER = 100
+
+# Configuration
+DEFAULT_CONFIG_FILENAME = "scraper_config.json"
+EXIT_COMMAND = 'exit'
+
+# Regex group indices
+REGEX_FIRST_MATCH_GROUP = 1
+
 
 def clean_filename(name: str) -> str:
     """Convert a string to a valid filename.
@@ -37,13 +110,13 @@ def clean_filename(name: str) -> str:
         Sanitized filename safe for filesystem use
     """
     # Remove filesystem-invalid characters including null bytes
-    name = re.sub(r'[\\/*?:"<>|\x00]', "", name)
+    name = re.sub(INVALID_FILENAME_CHARS_PATTERN, "", name)
     # Replace whitespace and hyphens with underscores
-    name = re.sub(r'[\s-]+', "_", name)
+    name = re.sub(WHITESPACE_PATTERN, "_", name)
     # Remove trailing dots and spaces (Windows compatibility)
     name = name.strip('. ')
-    # Limit length to 100 characters for compatibility
-    return name[:100]
+    # Limit length for compatibility
+    return name[:FILENAME_MAX_LENGTH]
 
 
 def extract_json_ld_data(soup: BeautifulSoup, verbose: bool = False) -> List[Dict[str, Any]]:
@@ -52,14 +125,14 @@ def extract_json_ld_data(soup: BeautifulSoup, verbose: bool = False) -> List[Dic
     Returns a list of parsed JSON-LD objects found in script tags.
     """
     json_ld_data = []
-    script_tags = soup.find_all('script', type='application/ld+json')
+    script_tags = soup.find_all('script', type=JSON_LD_SCRIPT_TYPE)
 
     for script in script_tags:
         try:
             data = json.loads(script.string)
             json_ld_data.append(data)
             if verbose:
-                print(f"Found JSON-LD data with @type: {data.get('@type', 'unknown')}")
+                print(f"Found JSON-LD data with @type: {data.get(JSON_LD_TYPE_KEY, JSON_LD_UNKNOWN_TYPE)}")
         except (json.JSONDecodeError, AttributeError) as e:
             if verbose:
                 print(f"Error parsing JSON-LD: {e}")
@@ -90,7 +163,7 @@ def extract_artsy_info_from_json_ld(json_ld_data: List[Dict[str, Any]], config: 
 
     Returns: (artist_name, artwork_title, image_url)
     """
-    site_config = config.get_site_config("artsy.net")
+    site_config = config.get_site_config(ARTSY_DOMAIN)
     json_ld_selectors = site_config.get("json_ld_selectors", {})
 
     artist_path = json_ld_selectors.get("artist_path", "creator.name")
@@ -104,9 +177,9 @@ def extract_artsy_info_from_json_ld(json_ld_data: List[Dict[str, Any]], config: 
     # Look through all JSON-LD objects for VisualArtwork type
     for data in json_ld_data:
         # Handle @graph structure
-        if "@graph" in data:
-            for item in data["@graph"]:
-                if item.get("@type") == "VisualArtwork":
+        if JSON_LD_GRAPH_KEY in data:
+            for item in data[JSON_LD_GRAPH_KEY]:
+                if item.get(JSON_LD_TYPE_KEY) == JSON_LD_ARTWORK_TYPE:
                     artist_name = get_nested_value(item, artist_path)
                     artwork_title = get_nested_value(item, artwork_path)
                     image_url = get_nested_value(item, image_path)
@@ -116,7 +189,7 @@ def extract_artsy_info_from_json_ld(json_ld_data: List[Dict[str, Any]], config: 
                         return artist_name, artwork_title, image_url
 
         # Handle direct VisualArtwork object
-        elif data.get("@type") == "VisualArtwork":
+        elif data.get(JSON_LD_TYPE_KEY) == JSON_LD_ARTWORK_TYPE:
             artist_name = get_nested_value(data, artist_path)
             artwork_title = get_nested_value(data, artwork_path)
             image_url = get_nested_value(data, image_path)
@@ -143,12 +216,12 @@ def extract_artsy_info(url: str, driver: webdriver.Chrome, config: ScraperConfig
 
     # Prepare URL-based fallback first
     url_path = urlparse(url).path
-    fallback_artist, fallback_artwork = "unknown", "artwork"
-    if '/artwork/' in url_path:
-        slug = url_path.split('/artwork/')[1].strip('/')
+    fallback_artist, fallback_artwork = DEFAULT_ARTIST_NAME, DEFAULT_ARTWORK_NAME
+    if ARTSY_ARTWORK_PATH in url_path:
+        slug = url_path.split(ARTSY_ARTWORK_PATH)[ARTWORK_SLUG_INDEX].strip('/')
         slug_parts = slug.split('-')
-        fallback_artist = ' '.join(slug_parts[:2]).title()
-        fallback_artwork = ' '.join(slug_parts[2:]).title() if len(slug_parts) > 2 else slug.title()
+        fallback_artist = ' '.join(slug_parts[:ARTIST_NAME_WORD_COUNT]).title()
+        fallback_artwork = ' '.join(slug_parts[ARTIST_NAME_WORD_COUNT:]).title() if len(slug_parts) > SLUG_PARTS_MIN_FOR_TITLE else slug.title()
         if verbose:
             print(f"URL-based fallback prepared: Artist='{fallback_artist}', Artwork='{fallback_artwork}'")
 
@@ -158,9 +231,9 @@ def extract_artsy_info(url: str, driver: webdriver.Chrome, config: ScraperConfig
             html = driver.page_source
             # Try lxml parser first for better performance, fall back to html.parser
             try:
-                soup = BeautifulSoup(html, "lxml")
+                soup = BeautifulSoup(html, PRIMARY_HTML_PARSER)
             except ImportError:
-                soup = BeautifulSoup(html, "html.parser")
+                soup = BeautifulSoup(html, FALLBACK_HTML_PARSER)
             json_ld_data = extract_json_ld_data(soup, verbose)
 
             if json_ld_data:
@@ -217,14 +290,14 @@ def extract_generic_info(url: str, driver: webdriver.Chrome, config: ScraperConf
             page_title = driver.title
             headings = []
             # Use WebDriverWait for finding headings if possible, or at least handle timeouts
-            for h_level in range(1, 4):
+            for h_level in range(MIN_HEADING_LEVEL, MAX_HEADING_LEVEL):
                 try:
-                    elements = WebDriverWait(driver, config.element_wait_timeout / 3).until( # Shorter wait per heading level
+                    elements = WebDriverWait(driver, config.element_wait_timeout / HEADING_WAIT_DIVISOR).until( # Shorter wait per heading level
                         EC.presence_of_all_elements_located((By.TAG_NAME, f'h{h_level}'))
                     )
                     for element in elements:
                         text = element.text.strip()
-                        if text and len(text) < 100:
+                        if text and len(text) < HEADING_MAX_LENGTH:
                             headings.append(text)
                 except Exception as e:
                     # Ignore if specific heading level not found quickly
@@ -232,13 +305,14 @@ def extract_generic_info(url: str, driver: webdriver.Chrome, config: ScraperConf
                         print(f"No h{h_level} headings found: {e}")
                     continue
             
-            if len(headings) >= 2: artist_name, artwork_name = headings[0], headings[1]
+            if len(headings) >= MIN_HEADINGS_FOR_BOTH:
+                artist_name, artwork_name = headings[ARTIST_HEADING_INDEX], headings[ARTWORK_HEADING_INDEX]
             elif len(headings) == 1:
-                artist_name = path_parts[0].replace('-', ' ').title() if path_parts else "unknown"
+                artist_name = path_parts[0].replace('-', ' ').title() if path_parts else DEFAULT_ARTIST_NAME
                 artwork_name = headings[0]
             else:
-                artist_name = path_parts[0].replace('-', ' ').title() if path_parts else "unknown"
-                artwork_name = path_parts[-1].replace('-', ' ').title() if len(path_parts) > 1 else page_title or "artwork"
+                artist_name = path_parts[0].replace('-', ' ').title() if path_parts else DEFAULT_ARTIST_NAME
+                artwork_name = path_parts[-1].replace('-', ' ').title() if len(path_parts) > MIN_PATH_PARTS_FOR_ARTWORK else page_title or DEFAULT_ARTWORK_NAME
             
             if verbose: print(f"Page-based extraction (generic): Artist='{artist_name}', Artwork='{artwork_name}'")
             return artist_name, artwork_name
@@ -255,8 +329,8 @@ def extract_generic_info(url: str, driver: webdriver.Chrome, config: ScraperConf
     except Exception as e:
         if verbose: print(f"Error in generic info extraction: {e}")
         domain_parts = parsed_url.netloc.split('.')
-        site_name = domain_parts[1] if len(domain_parts) > 2 else domain_parts[0]
-        return site_name.title(), "artwork"
+        site_name = domain_parts[1] if len(domain_parts) > DOMAIN_PARTS_THRESHOLD else domain_parts[0]
+        return site_name.title(), DEFAULT_ARTWORK_NAME
 
 # def setup_webdriver... # This function is removed, ResourceManager handles it.
 
@@ -268,7 +342,7 @@ def extract_original_image_url(cdn_url: str, config: ScraperConfig, verbose: boo
 
     This extracts the 'src' parameter which is the actual image URL.
     """
-    site_config = config.get_site_config("artsy.net")
+    site_config = config.get_site_config(ARTSY_DOMAIN)
     cdn_patterns = site_config.get("cdn_patterns", [r'resize_to=fit&src=([^&]+)', r'src=([^&]+)'])
 
     decoded_url = unquote(cdn_url)
@@ -276,7 +350,7 @@ def extract_original_image_url(cdn_url: str, config: ScraperConfig, verbose: boo
     for pattern in cdn_patterns:
         match = re.search(pattern, decoded_url)
         if match:
-            extracted_url = unquote(match.group(1))  # Double decode in case it's encoded twice
+            extracted_url = unquote(match.group(REGEX_FIRST_MATCH_GROUP))  # Double decode in case it's encoded twice
             if verbose:
                 print(f"Extracted original URL: {extracted_url}")
             return extracted_url
@@ -304,7 +378,7 @@ def extract_images_from_page(soup: BeautifulSoup, url: str, site_type: str, conf
     site_specific_config = config.get_site_config(parsed_url_netloc)
     unwanted_terms = site_specific_config.get('unwanted_image_terms_override', config.unwanted_image_terms)
 
-    if site_type == "artsy":
+    if site_type == SITE_TYPE_ARTSY:
         # Strategy 1: Try JSON-LD first (best quality)
         if site_specific_config.get("use_json_ld", True):
             json_ld_data = extract_json_ld_data(soup, verbose)
@@ -353,8 +427,8 @@ def extract_images_from_page(soup: BeautifulSoup, url: str, site_type: str, conf
         for img in img_tags:
             if 'src' in img.attrs:
                 src = img['src']
-                if 'data:image' in src or '.svg' in src: continue
-                if not src.startswith(('http://', 'https://')):
+                if DATA_URI_PREFIX in src or SVG_EXTENSION in src: continue
+                if not src.startswith((HTTP_SCHEME, HTTPS_SCHEME)):
                     base_url_scheme = urlparse(url).scheme
                     base_url_netloc = urlparse(url).netloc
                     src = f"{base_url_scheme}://{base_url_netloc.rstrip('/')}/{src.lstrip('/')}"
@@ -404,16 +478,18 @@ def download_images(unique_urls: Set[str], artist_dir: str, artwork_name: str, c
                 response.raise_for_status()
 
                 content_type_header = response.headers.get('content-type', '').lower()
-                file_extension = ".jpg" 
-                
-                if 'image/jpeg' in content_type_header: file_extension = ".jpg"
-                elif 'image/png' in content_type_header: file_extension = ".png"
-                elif 'image/gif' in content_type_header: file_extension = ".gif"
-                elif 'image/webp' in content_type_header: file_extension = ".webp"
-                elif 'image/bmp' in content_type_header: file_extension = ".bmp"
+                file_extension = DEFAULT_IMAGE_EXTENSION
+
+                # Map content type to extension
+                for content_type, ext in IMAGE_CONTENT_TYPES.items():
+                    if content_type in content_type_header:
+                        file_extension = ext
+                        break
                 else:
+                    # If no content type match, try to get extension from URL
                     path_ext = os.path.splitext(urlparse(img_url).path)[1].lower()
-                    if path_ext in config.preferred_extensions: file_extension = path_ext
+                    if path_ext in config.preferred_extensions:
+                        file_extension = path_ext
 
                 image_path = os.path.join(artist_dir, artwork_name + file_extension)
                 counter = 1
@@ -422,7 +498,7 @@ def download_images(unique_urls: Set[str], artist_dir: str, artwork_name: str, c
                     image_path = os.path.join(artist_dir, f"{base_name_for_path}_{counter}{file_extension}")
                     counter += 1
                 
-                if not content_type_header.startswith('image/') or len(response.content) < config.min_image_size:
+                if not content_type_header.startswith(IMAGE_CONTENT_TYPE_PREFIX) or len(response.content) < config.min_image_size:
                     msg = f"Skipping small/non-image (Type: {content_type_header}, Size: {len(response.content)}): {os.path.basename(img_url)}"
                     if verbose: print(msg)
                     if progress_callback: progress_callback({'type': 'message', 'value': msg})
@@ -434,7 +510,7 @@ def download_images(unique_urls: Set[str], artist_dir: str, artwork_name: str, c
                 dl_msg = f"DL {os.path.basename(image_path)} ({i+1}/{total_to_download})"
                 if verbose: print(dl_msg)
                 if progress_callback:
-                    percentage = int(((i + 1) / total_to_download) * 100) if total_to_download else 100
+                    percentage = int(((i + 1) / total_to_download) * PERCENTAGE_MULTIPLIER) if total_to_download else PERCENTAGE_MULTIPLIER
                     progress_callback({'type': 'percentage', 'value': percentage})
                     progress_callback({'type': 'message', 'value': dl_msg})
                     
@@ -488,7 +564,7 @@ def scrape_images(url: str, config_input: Optional[Union[ScraperConfig, str]] = 
                 if verbose: print(f"Waiting {config.render_wait_time}s for page to render...")
                 time.sleep(config.render_wait_time)
                 
-                if site_type == "artsy":
+                if site_type == SITE_TYPE_ARTSY:
                     artist_name, artwork_title = extract_artsy_info(url, driver, config, verbose)
                 else:
                     artist_name, artwork_title = extract_generic_info(url, driver, config, verbose)
@@ -516,9 +592,9 @@ def scrape_images(url: str, config_input: Optional[Union[ScraperConfig, str]] = 
                 html = driver.page_source
                 # Try to use lxml parser for better performance, fall back to html.parser
                 try:
-                    soup = BeautifulSoup(html, "lxml")
+                    soup = BeautifulSoup(html, PRIMARY_HTML_PARSER)
                 except ImportError:
-                    soup = BeautifulSoup(html, "html.parser")
+                    soup = BeautifulSoup(html, FALLBACK_HTML_PARSER)
                 
                 unique_urls = extract_images_from_page(soup, url, site_type, config, verbose)
                 msg = f"Found {len(unique_urls)} potential image URLs."
@@ -551,7 +627,7 @@ def main():
     print("--------------------------")
     
     # Load or create a default config file for standalone use
-    config_file_path = "scraper_config.json" 
+    config_file_path = DEFAULT_CONFIG_FILENAME
     if os.path.exists(config_file_path):
         config = ScraperConfig.load(config_file_path)
         print(f"Loaded configuration from {config_file_path}")
@@ -559,10 +635,10 @@ def main():
         config = ScraperConfig()
         config.save(config_file_path)
         print(f"Default configuration saved to {config_file_path}. You can customize it.")
-    
+
     while True:
         url = input("Enter the URL to scrape (or 'exit' to quit): ")
-        if url.lower() == 'exit': break
+        if url.lower() == EXIT_COMMAND: break
         
         # For standalone, use the output_directory from the loaded/default config
         # Or allow override via input:

@@ -21,13 +21,13 @@ class ScraperConfig:
     browser_ignore_cert_errors: bool = False  # Security: Only ignore cert errors when explicitly needed
     
     # Timeouts (in seconds)
-    page_load_timeout: int = 30 # Not directly used by driver.get, but can be for explicit waits
-    element_wait_timeout: int = 10
-    download_timeout: int = 10
-    render_wait_time: int = 3  # Time to wait for JavaScript to render
-    
+    page_load_timeout: int = 30  # Maximum time to wait for page to load (30 seconds)
+    element_wait_timeout: int = 10  # Maximum time to wait for elements to appear (10 seconds)
+    download_timeout: int = 10  # Maximum time to wait for image downloads (10 seconds)
+    render_wait_time: int = 3  # Time to wait for JavaScript to render dynamic content (3 seconds)
+
     # Image settings
-    min_image_size: int = 10000  # Minimum size in bytes
+    min_image_size: int = 10000  # Minimum image size in bytes (~10KB) to filter out thumbnails and icons
     preferred_extensions: List[str] = field(default_factory=lambda: [".jpg", ".jpeg", ".png", ".webp", ".bmp"]) # Added .bmp
     
     # Filtering
