@@ -2,6 +2,7 @@ import os
 import sys
 import re
 import time
+import json
 import requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -9,7 +10,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from bs4 import BeautifulSoup
 from urllib.parse import unquote, urlparse
-from typing import Optional, Union, Any, Callable, Dict
+from typing import Optional, Union, Any, Callable, Dict, Tuple, Set, List
 
 # Ensure the script's directory is in sys.path for local module resolution.
 # This can help linters like Pylance find 'config.py' and 'resources.py'
@@ -30,49 +31,169 @@ def clean_filename(name: str) -> str:
     return name[:100]
 
 
-def extract_artsy_info(url: str, driver: webdriver.Chrome, config: ScraperConfig, verbose: bool = False):
-    """Extract artist name and artwork title from an Artsy page using config."""
+def extract_json_ld_data(soup: BeautifulSoup, verbose: bool = False) -> List[Dict[str, Any]]:
+    """Extract JSON-LD structured data from page.
+
+    Returns a list of parsed JSON-LD objects found in script tags.
+    """
+    json_ld_data = []
+    script_tags = soup.find_all('script', type='application/ld+json')
+
+    for script in script_tags:
+        try:
+            data = json.loads(script.string)
+            json_ld_data.append(data)
+            if verbose:
+                print(f"Found JSON-LD data with @type: {data.get('@type', 'unknown')}")
+        except (json.JSONDecodeError, AttributeError) as e:
+            if verbose:
+                print(f"Error parsing JSON-LD: {e}")
+            continue
+
+    return json_ld_data
+
+
+def get_nested_value(data: Dict[str, Any], path: str, default: Any = None) -> Any:
+    """Get a nested value from a dictionary using dot notation path.
+
+    Example: get_nested_value(data, "creator.name") -> data["creator"]["name"]
+    """
+    keys = path.split('.')
+    current = data
+
+    for key in keys:
+        if isinstance(current, dict) and key in current:
+            current = current[key]
+        else:
+            return default
+
+    return current
+
+
+def extract_artsy_info_from_json_ld(json_ld_data: List[Dict[str, Any]], config: ScraperConfig, verbose: bool = False) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Extract artist, artwork, and image URL from Artsy JSON-LD data.
+
+    Returns: (artist_name, artwork_title, image_url)
+    """
+    site_config = config.get_site_config("artsy.net")
+    json_ld_selectors = site_config.get("json_ld_selectors", {})
+
+    artist_path = json_ld_selectors.get("artist_path", "creator.name")
+    artwork_path = json_ld_selectors.get("artwork_path", "name")
+    image_path = json_ld_selectors.get("image_path", "image.url")
+
+    artist_name = None
+    artwork_title = None
+    image_url = None
+
+    # Look through all JSON-LD objects for VisualArtwork type
+    for data in json_ld_data:
+        # Handle @graph structure
+        if "@graph" in data:
+            for item in data["@graph"]:
+                if item.get("@type") == "VisualArtwork":
+                    artist_name = get_nested_value(item, artist_path)
+                    artwork_title = get_nested_value(item, artwork_path)
+                    image_url = get_nested_value(item, image_path)
+                    if verbose:
+                        print(f"JSON-LD extraction: Artist='{artist_name}', Artwork='{artwork_title}'")
+                    if artist_name and artwork_title:
+                        return artist_name, artwork_title, image_url
+
+        # Handle direct VisualArtwork object
+        elif data.get("@type") == "VisualArtwork":
+            artist_name = get_nested_value(data, artist_path)
+            artwork_title = get_nested_value(data, artwork_path)
+            image_url = get_nested_value(data, image_path)
+            if verbose:
+                print(f"JSON-LD extraction: Artist='{artist_name}', Artwork='{artwork_title}'")
+            if artist_name and artwork_title:
+                return artist_name, artwork_title, image_url
+
+    return artist_name, artwork_title, image_url
+
+
+def extract_artsy_info(url: str, driver: webdriver.Chrome, config: ScraperConfig, verbose: bool = False) -> Tuple[str, str]:
+    """Extract artist name and artwork title from an Artsy page.
+
+    Uses multiple extraction strategies in order of reliability:
+    1. JSON-LD structured data (most reliable)
+    2. CSS selectors (fallback)
+    3. URL slug parsing (last resort)
+
+    Returns: (artist_name, artwork_title)
+    """
     site_specific_config = config.get_site_config(urlparse(url).netloc)
-    artist_selector = site_specific_config.get("artist_selector", "h2[data-test='artist-name']")
-    artwork_selector = site_specific_config.get("artwork_selector", "h1[data-test='artwork-title']")
+    use_json_ld = site_specific_config.get("use_json_ld", True)
+
+    # Prepare URL-based fallback first
+    url_path = urlparse(url).path
+    fallback_artist, fallback_artwork = "unknown", "artwork"
+    if '/artwork/' in url_path:
+        slug = url_path.split('/artwork/')[1].strip('/')
+        slug_parts = slug.split('-')
+        fallback_artist = ' '.join(slug_parts[:2]).title()
+        fallback_artwork = ' '.join(slug_parts[2:]).title() if len(slug_parts) > 2 else slug.title()
+        if verbose:
+            print(f"URL-based fallback prepared: Artist='{fallback_artist}', Artwork='{fallback_artwork}'")
 
     try:
-        url_path = urlparse(url).path
-        fallback_artist, fallback_artwork = "unknown", "artwork"
-        if '/artwork/' in url_path:
-            slug = url_path.split('/artwork/')[1].strip('/')
-            slug_parts = slug.split('-')
-            fallback_artist = ' '.join(slug_parts[:2]).title()
-            fallback_artwork = ' '.join(slug_parts[2:]).title() if len(slug_parts) > 2 else slug.title()
-            if verbose: print(f"URL-based fallback: Artist='{fallback_artist}', Artwork='{fallback_artwork}'")
-        
+        # Strategy 1: Try JSON-LD extraction (most reliable for Artsy)
+        if use_json_ld:
+            html = driver.page_source
+            soup = BeautifulSoup(html, "lxml" if "lxml" else "html.parser")
+            json_ld_data = extract_json_ld_data(soup, verbose)
+
+            if json_ld_data:
+                artist_name, artwork_title, _ = extract_artsy_info_from_json_ld(json_ld_data, config, verbose)
+                if artist_name and artwork_title:
+                    if verbose:
+                        print(f"JSON-LD extraction successful: Artist='{artist_name}', Artwork='{artwork_title}'")
+                    return artist_name, artwork_title
+                elif verbose:
+                    print("JSON-LD found but missing artist/artwork data, trying selectors...")
+
+        # Strategy 2: Try CSS selectors (fallback)
+        artist_selector = site_specific_config.get("artist_selector", "h2[data-test='artist-name']")
+        artwork_selector = site_specific_config.get("artwork_selector", "h1[data-test='artwork-title']")
+
         try:
             artist_element = WebDriverWait(driver, config.element_wait_timeout).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, artist_selector))
             )
             artist_name = artist_element.text.strip()
-            
+
             artwork_element = driver.find_element(By.CSS_SELECTOR, artwork_selector)
             artwork_title = artwork_element.text.strip()
-            
-            if verbose: print(f"Page-based extraction: Artist='{artist_name}', Artwork='{artwork_title}'")
-            return artist_name, artwork_title
-            
+
+            if artist_name and artwork_title:
+                if verbose:
+                    print(f"Selector-based extraction: Artist='{artist_name}', Artwork='{artwork_title}'")
+                return artist_name, artwork_title
         except Exception as e:
-            if verbose: print(f"Error extracting from page (selectors): {e}. Using fallback.")
-            return fallback_artist, fallback_artwork
-            
+            if verbose:
+                print(f"Error extracting with selectors: {e}")
+
+        # Strategy 3: Use URL-based fallback
+        if verbose:
+            print(f"Using URL-based fallback: Artist='{fallback_artist}', Artwork='{fallback_artwork}'")
+        return fallback_artist, fallback_artwork
+
     except Exception as e:
-        if verbose: print(f"Error in artist/artwork extraction: {e}")
-        return "unknown", "artwork"
+        if verbose:
+            print(f"Error in artist/artwork extraction: {e}")
+        return fallback_artist, fallback_artwork
 
 
-def extract_generic_info(url: str, driver: webdriver.Chrome, config: ScraperConfig, verbose: bool = False):
-    """Extract artist/collection name and image name from a generic page using config."""
+def extract_generic_info(url: str, driver: webdriver.Chrome, config: ScraperConfig, verbose: bool = False) -> Tuple[str, str]:
+    """Extract artist/collection name and image name from a generic page using config.
+
+    Returns: (artist_name, artwork_name)
+    """
     try:
         parsed_url = urlparse(url)
         path_parts = parsed_url.path.strip('/').split('/')
-        
+
         try:
             page_title = driver.title
             headings = []
@@ -84,8 +205,13 @@ def extract_generic_info(url: str, driver: webdriver.Chrome, config: ScraperConf
                     )
                     for element in elements:
                         text = element.text.strip()
-                        if text and len(text) < 100: headings.append(text)
-                except: pass # Ignore if specific heading level not found quickly
+                        if text and len(text) < 100:
+                            headings.append(text)
+                except Exception as e:
+                    # Ignore if specific heading level not found quickly
+                    if verbose:
+                        print(f"No h{h_level} headings found: {e}")
+                    continue
             
             if len(headings) >= 2: artist_name, artwork_name = headings[0], headings[1]
             elif len(headings) == 1:
@@ -115,28 +241,85 @@ def extract_generic_info(url: str, driver: webdriver.Chrome, config: ScraperConf
 
 # def setup_webdriver... # This function is removed, ResourceManager handles it.
 
-def extract_images_from_page(soup, url: str, site_type: str, config: ScraperConfig, verbose: bool = False):
-    """Extract image URLs from the page based on site type and config."""
+def extract_original_image_url(cdn_url: str, config: ScraperConfig, verbose: bool = False) -> str:
+    """Extract the original image URL from Artsy's CDN URL.
+
+    Artsy wraps images in CDN URLs like:
+    https://d7hftxdivxxvm.cloudfront.net?resize_to=fit&src=https%3A%2F%2Fd32dm0rphc51dk.cloudfront.net%2Fw1lhovVBCZMKBWMtqxH2fQ%2Flarge.jpg&width=1289
+
+    This extracts the 'src' parameter which is the actual image URL.
+    """
+    site_config = config.get_site_config("artsy.net")
+    cdn_patterns = site_config.get("cdn_patterns", [r'resize_to=fit&src=([^&]+)', r'src=([^&]+)'])
+
+    decoded_url = unquote(cdn_url)
+
+    for pattern in cdn_patterns:
+        match = re.search(pattern, decoded_url)
+        if match:
+            extracted_url = unquote(match.group(1))  # Double decode in case it's encoded twice
+            if verbose:
+                print(f"Extracted original URL: {extracted_url}")
+            return extracted_url
+
+    # If no pattern matches, return the original URL
+    return cdn_url
+
+
+def extract_images_from_page(soup, url: str, site_type: str, config: ScraperConfig, driver: Optional[webdriver.Chrome] = None, verbose: bool = False) -> Set[str]:
+    """Extract image URLs from the page based on site type and config.
+
+    Returns: Set of image URLs
+    """
     unique_urls = set()
     parsed_url_netloc = urlparse(url).netloc
     site_specific_config = config.get_site_config(parsed_url_netloc)
     unwanted_terms = site_specific_config.get('unwanted_image_terms_override', config.unwanted_image_terms)
 
     if site_type == "artsy":
-        all_divs = soup.find_all('div') # Consider using more specific selectors from config if available
-        for div in all_divs:
-            img_tags = div.find_all('img')
-            for img in img_tags:
-                if 'src' not in img.attrs: continue
+        # Strategy 1: Try JSON-LD first (best quality)
+        if site_specific_config.get("use_json_ld", True):
+            json_ld_data = extract_json_ld_data(soup, verbose)
+            if json_ld_data:
+                _, _, image_url = extract_artsy_info_from_json_ld(json_ld_data, config, verbose)
+                if image_url:
+                    # Extract original URL from CDN wrapper
+                    original_url = extract_original_image_url(image_url, config, verbose)
+                    unique_urls.add(original_url)
+                    if verbose:
+                        print(f"Added image from JSON-LD: {original_url}")
+
+        # Strategy 2: Look for preload links (high-quality images)
+        preload_links = soup.find_all('link', rel='preload', attrs={'as': 'image'})
+        for link in preload_links:
+            if 'href' in link.attrs:
+                img_url = link['href']
+                original_url = extract_original_image_url(img_url, config, verbose)
+                if not any(term in original_url.lower() for term in unwanted_terms):
+                    unique_urls.add(original_url)
+                    if verbose:
+                        print(f"Added image from preload link: {original_url}")
+
+        # Strategy 3: Look for meta tags with images
+        meta_images = soup.find_all('meta', property='og:image')
+        for meta in meta_images:
+            if 'content' in meta.attrs:
+                img_url = meta['content']
+                original_url = extract_original_image_url(img_url, config, verbose)
+                if not any(term in original_url.lower() for term in unwanted_terms):
+                    unique_urls.add(original_url)
+                    if verbose:
+                        print(f"Added image from og:image meta tag: {original_url}")
+
+        # Strategy 4: Parse img tags as fallback
+        img_tags = soup.find_all('img')
+        for img in img_tags:
+            if 'src' in img.attrs:
                 src = img['src']
-                decoded_url = unquote(src)
-                if "resize_to=fit&src=" in decoded_url: # Artsy specific URL transformation
-                    start_index = decoded_url.find("resize_to=fit&src=") + len("resize_to=fit&src=")
-                    end_index = decoded_url.find("&width") if "&width" in decoded_url else len(decoded_url)
-                    modified_url = decoded_url[start_index:end_index]
-                else: modified_url = decoded_url
-                if not any(term in modified_url.lower() for term in unwanted_terms):
-                    unique_urls.add(modified_url)
+                original_url = extract_original_image_url(src, config, verbose)
+                if not any(term in original_url.lower() for term in unwanted_terms):
+                    unique_urls.add(original_url)
+
     else: # Generic site
         img_tags = soup.find_all('img')
         for img in img_tags:
