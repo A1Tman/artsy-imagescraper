@@ -30,15 +30,117 @@ PROG_VALUE = 'value'
 PROG_PERCENTAGE = 'percentage'
 PROG_MESSAGE = 'message'
 
-# UI Constants
+# ============================================================================
+# Constants
+# ============================================================================
+
+# UI Dimensions
 WINDOW_WIDTH = 900
 WINDOW_HEIGHT = 700
+
+# Font Sizes
 TITLE_FONT_SIZE = 22
 HEADING_FONT_SIZE = 11
 NORMAL_FONT_SIZE = 10
 SMALL_FONT_SIZE = 9
+
+# Fonts
+FONT_ARIAL = 'Arial'
+FONT_COURIER = 'Courier New'
+
+# Text Limits
 STATUS_TEXT_MAX_LENGTH = 100
 FILENAME_MAX_LENGTH = 100
+
+# Margins and Spacing
+TITLE_MARGIN_BOTTOM = 8
+DESC_MARGIN_BOTTOM = 15
+WARNING_LABEL_MARGIN = 4
+
+# Color Scheme
+COLOR_DARK_BLUE = "#2C3E50"
+COLOR_GRAY = "#7F8C8D"
+COLOR_LIGHT_GRAY = "#BDC3C7"
+COLOR_BLUE = "#3498DB"
+COLOR_VERY_LIGHT_GRAY = "#ECF0F1"
+COLOR_MEDIUM_GRAY = "#D0D3D4"
+COLOR_GREEN = "#2ECC71"
+COLOR_DARK_GREEN = "#27AE60"
+COLOR_SLATE_GRAY = "#95A5A6"
+COLOR_DARKER_BLUE = "#2980B9"
+COLOR_RED = "#E74C3C"
+COLOR_DARK_RED = "#C0392B"
+
+# Application Info
+APP_NAME = "ImageScraper"
+WINDOW_TITLE = 'Universal Image Scraper'
+APP_DESCRIPTION = 'Download and organize artwork from various websites'
+
+# UI Text
+URL_INPUT_PLACEHOLDER = 'Enter URL (e.g., https://www.example.com/artwork/title)'
+URL_WARNING_MESSAGE = "⚠️ Invalid URL format or missing http(s)://"
+SAVE_DIR_PLACEHOLDER = 'Choose a folder to save images'
+DEFAULT_SCRAPED_IMAGES_DIR = 'Scraped_Images'
+STATUS_READY = 'Ready'
+
+# Button Text
+BTN_START_SCRAPING = 'Start Scraping'
+BTN_CHECK_UPDATE_PACKAGES = 'Check/Update Packages'
+BTN_CANCEL = 'Cancel'
+
+# Configuration Files
+SETTINGS_FILENAME = "settings.json"
+SCRAPER_CONFIG_FILENAME = "scraper_config.json"
+HISTORY_FILENAME = 'scraper_history.json'
+
+# JSON Formatting
+JSON_INDENT_SPACES = 4
+
+# Example Prefix
+EXAMPLE_PREFIX = "Artsy: "
+EXAMPLE_NONE_INDEX = 0
+
+# Progress Bar
+PROGRESS_INDETERMINATE_MIN = 0
+PROGRESS_INDETERMINATE_MAX = 0
+PROGRESS_PERCENTAGE_MAX = 100
+
+# History
+HISTORY_INSERT_INDEX = 0
+HISTORY_URL_PATTERN = r' - (https?://[^\s]+) \(.*'
+HISTORY_ITEM_FORMAT = "{timestamp} - {url} ({count} images)"
+HISTORY_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
+LOG_TIME_FORMAT = "%H:%M:%S"
+
+# Tab Indices
+LOG_TAB_INDEX = 0
+
+# URL Validation
+VALID_URL_SCHEMES = ("http", "https")
+EXAMPLE_URL_INDEX = 1
+
+# Platform-Specific
+PLATFORM_WINDOWS = 'win32'
+PLATFORM_MACOS = 'darwin'
+WINDOWS_INVALID_PATH_CHARS = ['<', '>', '|', '&', '^']
+FILE_OPEN_TIMEOUT_SECONDS = 5
+
+# Security - System Directories
+WINDOWS_FORBIDDEN_DIRS = [
+    "C:\\Windows",
+    "C:\\Program Files",
+    "C:\\Program Files (x86)"
+]
+UNIX_FORBIDDEN_DIRS = ["/bin", "/sbin", "/boot", "/etc", "/sys", "/proc"]
+
+# Package Management
+REQUIRED_PACKAGES = ['selenium', 'beautifulsoup4', 'requests', 'webdriver-manager', 'PyQt5', 'appdirs']
+PIP_MODULE = 'pip'
+PIP_LIST_CMD = 'list'
+PIP_OUTDATED_FLAG = '--outdated'
+PIP_FORMAT_FLAG = '--format=json'
+PIP_INSTALL_CMD = 'install'
+PIP_UPGRADE_FLAG = '--upgrade'
 
 class WorkerSignals(QObject):
     """
@@ -66,13 +168,13 @@ class UpdatePackagesThread(threading.Thread):
     def run(self) -> None:
         try:
             self.signals.progress.emit("Starting package check...")
-            required_packages = ['selenium', 'beautifulsoup4', 'requests', 'webdriver-manager', 'PyQt5', 'appdirs']
+            required_packages = REQUIRED_PACKAGES
             updated_count = 0
             already_latest_count = 0
 
             self.signals.progress.emit("Checking for outdated packages...")
             result = subprocess.run(
-                [sys.executable, '-m', 'pip', 'list', '--outdated', '--format=json'],
+                [sys.executable, '-m', PIP_MODULE, PIP_LIST_CMD, PIP_OUTDATED_FLAG, PIP_FORMAT_FLAG],
                 capture_output=True, text=True, check=False
             )
 
@@ -125,9 +227,9 @@ class UpdatePackagesThread(threading.Thread):
                         should_update = True # Treat as an update/install
 
                 if should_update:
-                    pip_command = ['install', '--upgrade', package] if package_lower in outdated_dict or (not outdated_dict and self._get_package_version(package)) else ['install', package]
+                    pip_command = [PIP_INSTALL_CMD, PIP_UPGRADE_FLAG, package] if package_lower in outdated_dict or (not outdated_dict and self._get_package_version(package)) else [PIP_INSTALL_CMD, package]
                     update_result = subprocess.run(
-                        [sys.executable, '-m', 'pip'] + pip_command,
+                        [sys.executable, '-m', PIP_MODULE] + pip_command,
                         capture_output=True, text=True, check=False
                     )
                     if self.cancel_requested: break
@@ -227,7 +329,7 @@ class ImageScraperApp(QMainWindow):
         self.initUI()      
 
     def initUI(self) -> None:
-        self.setWindowTitle('Universal Image Scraper')
+        self.setWindowTitle(WINDOW_TITLE)
         self.setGeometry(100, 100, WINDOW_WIDTH, WINDOW_HEIGHT)
 
         main_layout = QVBoxLayout()
@@ -235,31 +337,31 @@ class ImageScraperApp(QMainWindow):
         main_layout.setContentsMargins(15, 15, 15, 15)
 
         # Title
-        title_label = QLabel('Universal Image Scraper')
+        title_label = QLabel(WINDOW_TITLE)
         title_label.setAlignment(Qt.AlignCenter)
-        title_label.setFont(QFont('Arial', TITLE_FONT_SIZE, QFont.Bold))
-        title_label.setStyleSheet("color: #2C3E50; margin-bottom: 8px;")
+        title_label.setFont(QFont(FONT_ARIAL, TITLE_FONT_SIZE, QFont.Bold))
+        title_label.setStyleSheet(f"color: {COLOR_DARK_BLUE}; margin-bottom: {TITLE_MARGIN_BOTTOM}px;")
         main_layout.addWidget(title_label)
 
         # Description
-        desc_label = QLabel('Download and organize artwork from various websites')
+        desc_label = QLabel(APP_DESCRIPTION)
         desc_label.setAlignment(Qt.AlignCenter)
-        desc_label.setFont(QFont('Arial', HEADING_FONT_SIZE))
-        desc_label.setStyleSheet("color: #7F8C8D; margin-bottom: 15px;")
+        desc_label.setFont(QFont(FONT_ARIAL, HEADING_FONT_SIZE))
+        desc_label.setStyleSheet(f"color: {COLOR_GRAY}; margin-bottom: {DESC_MARGIN_BOTTOM}px;")
         main_layout.addWidget(desc_label)
 
         # URL Input Group
         url_group = QGroupBox("Website URL")
-        url_group.setFont(QFont('Arial', NORMAL_FONT_SIZE))
+        url_group.setFont(QFont(FONT_ARIAL, NORMAL_FONT_SIZE))
         url_layout = QVBoxLayout()
         url_layout.setSpacing(5)
 
         url_examples_label = QLabel("Example URLs:")
-        url_examples_label.setFont(QFont('Arial', SMALL_FONT_SIZE))
+        url_examples_label.setFont(QFont(FONT_ARIAL, SMALL_FONT_SIZE))
         url_layout.addWidget(url_examples_label)
 
         self.url_examples = QComboBox()
-        self.url_examples.setFont(QFont('Arial', NORMAL_FONT_SIZE))
+        self.url_examples.setFont(QFont(FONT_ARIAL, NORMAL_FONT_SIZE))
         self.url_examples.addItem("Select an example...")
         self.url_examples.addItem("Artsy: https://www.artsy.net/artwork/ed-ruscha-history-kids-236")
         self.url_examples.addItem("Artsy: https://www.artsy.net/artwork/shepard-fairey-shepard-fairey-screenprint-opt-art-green-gradient-street-contemporary-art-obey-giant")
@@ -268,14 +370,14 @@ class ImageScraperApp(QMainWindow):
         url_layout.addWidget(self.url_examples)
 
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText('Enter URL (e.g., https://www.example.com/artwork/title)')
-        self.url_input.setFont(QFont('Arial', NORMAL_FONT_SIZE))
+        self.url_input.setPlaceholderText(URL_INPUT_PLACEHOLDER)
+        self.url_input.setFont(QFont(FONT_ARIAL, NORMAL_FONT_SIZE))
         self.url_input.setStyleSheet("QLineEdit {padding: 10px; border: 1px solid #BDC3C7; border-radius: 4px;} QLineEdit:focus {border: 1px solid #3498DB;}")
         self.url_input.textChanged.connect(self.validate_url_input_live) # Live validation
         url_layout.addWidget(self.url_input)
 
-        self.url_warning_label = QLabel("⚠️ Invalid URL format or missing http(s)://")
-        self.url_warning_label.setStyleSheet("color: #E74C3C; font-size: 9px; margin-left: 4px;")
+        self.url_warning_label = QLabel(URL_WARNING_MESSAGE)
+        self.url_warning_label.setStyleSheet(f"color: {COLOR_RED}; font-size: {SMALL_FONT_SIZE}px; margin-left: {WARNING_LABEL_MARGIN}px;")
         self.url_warning_label.setVisible(False)
         url_layout.addWidget(self.url_warning_label)
         
@@ -284,17 +386,17 @@ class ImageScraperApp(QMainWindow):
 
         # Save Directory Group
         save_group = QGroupBox("Save Location")
-        save_group.setFont(QFont('Arial', 10))
+        save_group.setFont(QFont(FONT_ARIAL, 10))
         save_layout = QHBoxLayout()
         
         self.save_dir_input = QLineEdit()
-        self.save_dir_input.setPlaceholderText('Choose a folder to save images')
-        self.save_dir_input.setFont(QFont('Arial', 10))
+        self.save_dir_input.setPlaceholderText(SAVE_DIR_PLACEHOLDER)
+        self.save_dir_input.setFont(QFont(FONT_ARIAL, 10))
         self.save_dir_input.setStyleSheet("QLineEdit {padding: 10px; border: 1px solid #BDC3C7; border-radius: 4px;}")
         save_layout.addWidget(self.save_dir_input)
 
         self.browse_button = QPushButton('Browse')
-        self.browse_button.setFont(QFont('Arial', 10, QFont.Bold))
+        self.browse_button.setFont(QFont(FONT_ARIAL, 10, QFont.Bold))
         self.browse_button.setStyleSheet("QPushButton {padding: 10px 15px; background-color: #ECF0F1; border: none; border-radius: 4px;} QPushButton:hover {background-color: #D0D3D4;}")
         self.browse_button.clicked.connect(self.browse_directory)
         save_layout.addWidget(self.browse_button)
@@ -303,14 +405,14 @@ class ImageScraperApp(QMainWindow):
 
         # Tab Widget for Logs and History
         self.tab_widget = QTabWidget()
-        self.tab_widget.setFont(QFont('Arial', 10))
+        self.tab_widget.setFont(QFont(FONT_ARIAL, 10))
 
         # Log Tab
         log_tab = QWidget()
         log_layout = QVBoxLayout()
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
-        self.log_output.setFont(QFont('Courier New', 9))
+        self.log_output.setFont(QFont(FONT_COURIER, 9))
         log_layout.addWidget(self.log_output)
         log_tab.setLayout(log_layout)
         self.tab_widget.addTab(log_tab, "Logs")
@@ -319,18 +421,18 @@ class ImageScraperApp(QMainWindow):
         history_tab = QWidget()
         history_layout = QVBoxLayout()
         self.history_list = QListWidget()
-        self.history_list.setFont(QFont('Arial', 10))
+        self.history_list.setFont(QFont(FONT_ARIAL, 10))
         self.history_list.itemDoubleClicked.connect(self.reuse_selected_url)
         history_layout.addWidget(self.history_list)
         
         history_buttons_layout = QHBoxLayout()
         self.reuse_button = QPushButton("Reuse Selected URL")
-        self.reuse_button.setFont(QFont('Arial', 10))
+        self.reuse_button.setFont(QFont(FONT_ARIAL, 10))
         self.reuse_button.clicked.connect(self.reuse_selected_url)
         history_buttons_layout.addWidget(self.reuse_button)
         
         self.clear_history_button = QPushButton("Clear History")
-        self.clear_history_button.setFont(QFont('Arial', 10))
+        self.clear_history_button.setFont(QFont(FONT_ARIAL, 10))
         self.clear_history_button.setStyleSheet("QPushButton {color: #E74C3C;}")
         self.clear_history_button.clicked.connect(self.clear_history)
         history_buttons_layout.addWidget(self.clear_history_button)
@@ -344,11 +446,11 @@ class ImageScraperApp(QMainWindow):
         # Status Label and Progress Bar
         status_layout = QHBoxLayout()
         self.status_label = QLabel('Ready')
-        self.status_label.setFont(QFont('Arial', 10))
+        self.status_label.setFont(QFont(FONT_ARIAL, 10))
         status_layout.addWidget(self.status_label, 1) # Give it more space
 
         self.progress_bar = QProgressBar()
-        self.progress_bar.setFont(QFont('Arial', 9))
+        self.progress_bar.setFont(QFont(FONT_ARIAL, 9))
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setRange(0,100) # Default to percentage
         status_layout.addWidget(self.progress_bar)
@@ -358,20 +460,20 @@ class ImageScraperApp(QMainWindow):
         buttons_layout = QHBoxLayout()
         buttons_layout.setSpacing(10)
 
-        self.start_button = QPushButton('Start Scraping')
-        self.start_button.setFont(QFont('Arial', 11, QFont.Bold))
+        self.start_button = QPushButton(BTN_START_SCRAPING)
+        self.start_button.setFont(QFont(FONT_ARIAL, 11, QFont.Bold))
         self.start_button.setStyleSheet("QPushButton {padding: 12px; background-color: #2ECC71; color: white; border: none; border-radius: 4px;} QPushButton:hover {background-color: #27AE60;} QPushButton:disabled {background-color: #95A5A6;}")
         self.start_button.clicked.connect(self.start_scraping)
         buttons_layout.addWidget(self.start_button)
 
-        self.update_button = QPushButton('Check/Update Packages')
-        self.update_button.setFont(QFont('Arial', 10))
+        self.update_button = QPushButton(BTN_CHECK_UPDATE_PACKAGES)
+        self.update_button.setFont(QFont(FONT_ARIAL, 10))
         self.update_button.setStyleSheet("QPushButton {padding: 10px; background-color: #3498DB; color: white; border: none; border-radius: 4px;} QPushButton:hover {background-color: #2980B9;} QPushButton:disabled {background-color: #95A5A6;}")
         self.update_button.clicked.connect(self.update_packages)
         buttons_layout.addWidget(self.update_button)
         
-        self.cancel_button = QPushButton('Cancel')
-        self.cancel_button.setFont(QFont('Arial', 10))
+        self.cancel_button = QPushButton(BTN_CANCEL)
+        self.cancel_button.setFont(QFont(FONT_ARIAL, 10))
         self.cancel_button.setStyleSheet("QPushButton {padding: 10px; background-color: #E74C3C; color: white; border: none; border-radius: 4px;} QPushButton:hover {background-color: #C0392B;} QPushButton:disabled {background-color: #95A5A6;}")
         self.cancel_button.clicked.connect(self.cancel_operation)
         buttons_layout.addWidget(self.cancel_button)
@@ -379,12 +481,12 @@ class ImageScraperApp(QMainWindow):
         # Utility buttons
         utility_buttons_layout = QHBoxLayout()
         self.clear_fields_button = QPushButton("Clear Inputs")
-        self.clear_fields_button.setFont(QFont('Arial', 10))
+        self.clear_fields_button.setFont(QFont(FONT_ARIAL, 10))
         self.clear_fields_button.clicked.connect(self.clear_fields)
         utility_buttons_layout.addWidget(self.clear_fields_button)
 
         self.open_folder_button = QPushButton("Open Output Folder")
-        self.open_folder_button.setFont(QFont('Arial', 10))
+        self.open_folder_button.setFont(QFont(FONT_ARIAL, 10))
         self.open_folder_button.clicked.connect(self.open_output_folder)
         utility_buttons_layout.addWidget(self.open_folder_button)
         
@@ -417,7 +519,7 @@ class ImageScraperApp(QMainWindow):
         self.validate_url_input_live() # Initial validation based on current (possibly empty) text
         
         # Set initial status
-        self.status_label.setText('Ready')
+        self.status_label.setText(STATUS_READY)
         self.progress_bar.setVisible(False)
         self.cancel_button.setEnabled(False)
         self.active_operation = None
@@ -489,7 +591,7 @@ class ImageScraperApp(QMainWindow):
     def clear_fields(self) -> None:
         """Clear URL input and reset UI to initial state."""
         self.url_input.clear()
-        self.status_label.setText('Ready')
+        self.status_label.setText(STATUS_READY)
         self.url_examples.setCurrentIndex(0)
         self.validate_url_input_live()
         self.progress_bar.setValue(0)
@@ -519,20 +621,20 @@ class ImageScraperApp(QMainWindow):
             return
 
         # Security: On Windows, verify path doesn't contain special characters that could be exploited
-        if sys.platform == 'win32' and any(char in path for char in ['<', '>', '|', '&', '^']):
+        if sys.platform == PLATFORM_WINDOWS and any(char in path for char in WINDOWS_INVALID_PATH_CHARS):
             QMessageBox.warning(self, "Invalid Path", "Path contains invalid characters.")
             return
 
         try:
-            if sys.platform == 'win32':
+            if sys.platform == PLATFORM_WINDOWS:
                 # Use os.startfile which is safer on Windows
                 os.startfile(path)
-            elif sys.platform == 'darwin':
+            elif sys.platform == PLATFORM_MACOS:
                 # macOS: Use list form to prevent shell injection
-                subprocess.run(['open', path], check=True, timeout=5)
+                subprocess.run(['open', path], check=True, timeout=FILE_OPEN_TIMEOUT_SECONDS)
             else:
                 # Linux: Use list form to prevent shell injection
-                subprocess.run(['xdg-open', path], check=True, timeout=5)
+                subprocess.run(['xdg-open', path], check=True, timeout=FILE_OPEN_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
             QMessageBox.warning(self, "Timeout", "Opening folder timed out.")
         except Exception as e:
@@ -687,16 +789,12 @@ class ImageScraperApp(QMainWindow):
 
             # Check if path tries to access sensitive system directories
             forbidden_prefixes = []
-            if sys.platform == 'win32':
+            if sys.platform == PLATFORM_WINDOWS:
                 # Windows: Prevent access to system directories
-                forbidden_prefixes = [
-                    os.path.abspath("C:\\Windows"),
-                    os.path.abspath("C:\\Program Files"),
-                    os.path.abspath("C:\\Program Files (x86)"),
-                ]
+                forbidden_prefixes = [os.path.abspath(path) for path in WINDOWS_FORBIDDEN_DIRS]
             else:
                 # Unix-like: Prevent access to system directories
-                forbidden_prefixes = ["/bin", "/sbin", "/boot", "/etc", "/sys", "/proc"]
+                forbidden_prefixes = UNIX_FORBIDDEN_DIRS
 
             # Check if path is trying to access forbidden directories
             for forbidden in forbidden_prefixes:

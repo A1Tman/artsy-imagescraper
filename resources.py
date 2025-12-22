@@ -19,12 +19,35 @@ if _MODULE_DIR not in sys.path:
     sys.path.insert(0, _MODULE_DIR)
 from config import ScraperConfig
 
+# ============================================================================
+# Constants
+# ============================================================================
+
+# Logging
+LOGGER_NAME = "image_scraper"
+LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+
+# HTTP Headers
+HEADER_USER_AGENT = 'User-Agent'
+HEADER_ACCEPT = 'Accept'
+HEADER_ACCEPT_LANGUAGE = 'Accept-Language'
+HEADER_CONNECTION = 'Connection'
+HTTP_ACCEPT_VALUE = 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+HTTP_ACCEPT_LANGUAGE_VALUE = 'en-US,en;q=0.9'
+HTTP_CONNECTION_VALUE = 'keep-alive'
+
+# Chrome Arguments
+CHROME_ARG_IGNORE_CERT = '--ignore-certificate-errors'
+CHROME_ARG_INCOGNITO = '--incognito'
+CHROME_ARG_HEADLESS = '--headless'
+CHROME_ARG_DISABLE_AUTOMATION = '--disable-blink-features=AutomationControlled'
+CHROME_ARG_USER_AGENT_PREFIX = '--user-agent='
 
 # Configure logging - basic setup if not configured by the main application
 # This allows the logger to output messages if the main app doesn't set up handlers.
-logger = logging.getLogger("image_scraper")
+logger = logging.getLogger(LOGGER_NAME)
 if not logger.hasHandlers():
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 
 
 class ResourceManager:
@@ -42,10 +65,10 @@ class ResourceManager:
             logger.debug("Initializing new HTTP session.")
             self._session = requests.Session()
             self._session.headers.update({
-                'User-Agent': self.config.browser_user_agent, # Using browser_user_agent for consistency
-                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Connection': 'keep-alive',
+                HEADER_USER_AGENT: self.config.browser_user_agent,
+                HEADER_ACCEPT: HTTP_ACCEPT_VALUE,
+                HEADER_ACCEPT_LANGUAGE: HTTP_ACCEPT_LANGUAGE_VALUE,
+                HEADER_CONNECTION: HTTP_CONNECTION_VALUE,
             })
         
         try:
@@ -69,19 +92,19 @@ class ResourceManager:
                 options = Options()
                 
                 if self.config.browser_ignore_cert_errors:
-                    options.add_argument('--ignore-certificate-errors')
-                
+                    options.add_argument(CHROME_ARG_IGNORE_CERT)
+
                 if self.config.browser_incognito:
-                    options.add_argument('--incognito')
-                
+                    options.add_argument(CHROME_ARG_INCOGNITO)
+
                 if self.config.browser_headless:
-                    options.add_argument('--headless')
-                
+                    options.add_argument(CHROME_ARG_HEADLESS)
+
                 if self.config.browser_disable_automation:
-                    options.add_argument('--disable-blink-features=AutomationControlled')
-                
-                if self.config.browser_user_agent: # Ensure user_agent is actually set
-                    options.add_argument(f'--user-agent={self.config.browser_user_agent}')
+                    options.add_argument(CHROME_ARG_DISABLE_AUTOMATION)
+
+                if self.config.browser_user_agent:
+                    options.add_argument(f'{CHROME_ARG_USER_AGENT_PREFIX}{self.config.browser_user_agent}')
                 
                 # Add Chrome performance logging (optional, can be noisy)
                 # options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
