@@ -85,13 +85,15 @@ Site-specific configs for Artsy.net are in the `site_configs` dict and can be ex
 
 ## What's New in v2.2
 
-This version fixes the broken Artsy scraping that wasn't working properly:
+Major improvements to reliability and code quality:
 
-- Uses JSON-LD structured data extraction instead of unreliable CSS selectors
-- Actually downloads the original high-res images instead of thumbnails
+- Uses JSON-LD structured data extraction for more reliable artist/artwork identification
+- Better high-res image URL extraction from Artsy's CDN wrappers
 - Multi-tier fallback system: JSON-LD → Preload Links → Meta Tags → IMG tags → URL parsing
-- Fixed all the bare except clauses with proper error handling
-- Added type hints everywhere
+- Fixed security issues: path traversal protection, command injection prevention
+- Fixed bare except clauses with proper error handling
+- Enhanced filename sanitization for cross-platform compatibility
+- Added comprehensive type hints and docstrings
 - Verbose logging shows which extraction method worked
 
 Technical changes:
