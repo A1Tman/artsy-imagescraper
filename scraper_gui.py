@@ -46,16 +46,12 @@ SMALL_FONT_SIZE = 9
 
 # Fonts
 FONT_ARIAL = 'Arial'
-FONT_COURIER = 'Courier New'
 
 # Text Limits
 STATUS_TEXT_MAX_LENGTH = 100
 FILENAME_MAX_LENGTH = 100
 
-# Margins and Spacing
-TITLE_MARGIN_BOTTOM = 8
-DESC_MARGIN_BOTTOM = 15
-WARNING_LABEL_MARGIN = 4
+# Margins and Spacing (removed over-engineered single-use margin constants)
 
 # Color Scheme
 COLOR_DARK_BLUE = "#2C3E50"
@@ -93,31 +89,14 @@ SETTINGS_FILENAME = "settings.json"
 SCRAPER_CONFIG_FILENAME = "scraper_config.json"
 HISTORY_FILENAME = 'scraper_history.json'
 
-# JSON Formatting
-JSON_INDENT_SPACES = 4
-
-# Example Prefix
-EXAMPLE_PREFIX = "Artsy: "
-EXAMPLE_NONE_INDEX = 0
-
-# Progress Bar
-PROGRESS_INDETERMINATE_MIN = 0
-PROGRESS_INDETERMINATE_MAX = 0
-PROGRESS_PERCENTAGE_MAX = 100
-
 # History
-HISTORY_INSERT_INDEX = 0
 HISTORY_URL_PATTERN = r' - (https?://[^\s]+) \(.*'
 HISTORY_ITEM_FORMAT = "{timestamp} - {url} ({count} images)"
 HISTORY_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 LOG_TIME_FORMAT = "%H:%M:%S"
 
-# Tab Indices
-LOG_TAB_INDEX = 0
-
 # URL Validation
 VALID_URL_SCHEMES = ("http", "https")
-EXAMPLE_URL_INDEX = 1
 
 # Platform-Specific
 PLATFORM_WINDOWS = 'win32'
@@ -135,12 +114,6 @@ UNIX_FORBIDDEN_DIRS = ["/bin", "/sbin", "/boot", "/etc", "/sys", "/proc"]
 
 # Package Management
 REQUIRED_PACKAGES = ['selenium', 'beautifulsoup4', 'requests', 'webdriver-manager', 'PyQt5', 'appdirs']
-PIP_MODULE = 'pip'
-PIP_LIST_CMD = 'list'
-PIP_OUTDATED_FLAG = '--outdated'
-PIP_FORMAT_FLAG = '--format=json'
-PIP_INSTALL_CMD = 'install'
-PIP_UPGRADE_FLAG = '--upgrade'
 
 class WorkerSignals(QObject):
     """
@@ -174,7 +147,7 @@ class UpdatePackagesThread(threading.Thread):
 
             self.signals.progress.emit("Checking for outdated packages...")
             result = subprocess.run(
-                [sys.executable, '-m', PIP_MODULE, PIP_LIST_CMD, PIP_OUTDATED_FLAG, PIP_FORMAT_FLAG],
+                [sys.executable, '-m', 'pip', 'list', '--outdated', '--format=json'],
                 capture_output=True, text=True, check=False
             )
 
@@ -227,9 +200,9 @@ class UpdatePackagesThread(threading.Thread):
                         should_update = True # Treat as an update/install
 
                 if should_update:
-                    pip_command = [PIP_INSTALL_CMD, PIP_UPGRADE_FLAG, package] if package_lower in outdated_dict or (not outdated_dict and self._get_package_version(package)) else [PIP_INSTALL_CMD, package]
+                    pip_command = ['install', '--upgrade', package] if package_lower in outdated_dict or (not outdated_dict and self._get_package_version(package)) else ['install', package]
                     update_result = subprocess.run(
-                        [sys.executable, '-m', PIP_MODULE] + pip_command,
+                        [sys.executable, '-m', 'pip'] + pip_command,
                         capture_output=True, text=True, check=False
                     )
                     if self.cancel_requested: break
@@ -340,14 +313,14 @@ class ImageScraperApp(QMainWindow):
         title_label = QLabel(WINDOW_TITLE)
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setFont(QFont(FONT_ARIAL, TITLE_FONT_SIZE, QFont.Bold))
-        title_label.setStyleSheet(f"color: {COLOR_DARK_BLUE}; margin-bottom: {TITLE_MARGIN_BOTTOM}px;")
+        title_label.setStyleSheet(f"color: {COLOR_DARK_BLUE}; margin-bottom: 8px;")
         main_layout.addWidget(title_label)
 
         # Description
         desc_label = QLabel(APP_DESCRIPTION)
         desc_label.setAlignment(Qt.AlignCenter)
         desc_label.setFont(QFont(FONT_ARIAL, HEADING_FONT_SIZE))
-        desc_label.setStyleSheet(f"color: {COLOR_GRAY}; margin-bottom: {DESC_MARGIN_BOTTOM}px;")
+        desc_label.setStyleSheet(f"color: {COLOR_GRAY}; margin-bottom: 15px;")
         main_layout.addWidget(desc_label)
 
         # URL Input Group
@@ -377,7 +350,7 @@ class ImageScraperApp(QMainWindow):
         url_layout.addWidget(self.url_input)
 
         self.url_warning_label = QLabel(URL_WARNING_MESSAGE)
-        self.url_warning_label.setStyleSheet(f"color: {COLOR_RED}; font-size: {SMALL_FONT_SIZE}px; margin-left: {WARNING_LABEL_MARGIN}px;")
+        self.url_warning_label.setStyleSheet(f"color: {COLOR_RED}; font-size: {SMALL_FONT_SIZE}px; margin-left: 4px;")
         self.url_warning_label.setVisible(False)
         url_layout.addWidget(self.url_warning_label)
         
@@ -412,7 +385,7 @@ class ImageScraperApp(QMainWindow):
         log_layout = QVBoxLayout()
         self.log_output = QTextEdit()
         self.log_output.setReadOnly(True)
-        self.log_output.setFont(QFont(FONT_COURIER, 9))
+        self.log_output.setFont(QFont('Courier New', 9))
         log_layout.addWidget(self.log_output)
         log_tab.setLayout(log_layout)
         self.tab_widget.addTab(log_tab, "Logs")
