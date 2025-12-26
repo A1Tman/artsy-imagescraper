@@ -5,6 +5,30 @@ All notable changes to the Artsy Image Scraper project will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3] - 2025-12-26
+
+### Fixed My Own Mess
+
+Yeah so turns out adding 70+ constants was overkill. Went back and nuked the stupid ones.
+
+**What got axed:**
+- `ARTWORK_SLUG_INDEX = 1` - bro just write `[1]`
+- `PERCENTAGE_MULTIPLIER = 100` - it's called a percentage for a reason
+- `PIP_INSTALL_CMD = 'install'` - these are literally just pip commands
+- Single-use margins like `TITLE_MARGIN_BOTTOM = 8` - not every number needs a name
+
+Removed 36+ pointless constants across the codebase. If it's only used once and the value is obvious, it doesn't need to be a constant.
+
+**What stayed:**
+- Colors used 20+ times (`FONT_ARIAL`, `COLOR_DARK_BLUE`)
+- Complex regex patterns that look like line noise
+- Security stuff (`WINDOWS_FORBIDDEN_DIRS`, `UNIX_FORBIDDEN_DIRS`)
+- Config that might actually change
+
+Net result: -24 lines, way more readable. Sometimes less abstraction is better.
+
+---
+
 ## [2.2] - 2025-12-22
 
 ### 🎉 Major Improvements
