@@ -27,21 +27,10 @@ from config import ScraperConfig
 LOGGER_NAME = "image_scraper"
 LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 
-# HTTP Headers
-HEADER_USER_AGENT = 'User-Agent'
-HEADER_ACCEPT = 'Accept'
-HEADER_ACCEPT_LANGUAGE = 'Accept-Language'
-HEADER_CONNECTION = 'Connection'
+# HTTP Headers - complex values worth naming
 HTTP_ACCEPT_VALUE = 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
 HTTP_ACCEPT_LANGUAGE_VALUE = 'en-US,en;q=0.9'
 HTTP_CONNECTION_VALUE = 'keep-alive'
-
-# Chrome Arguments
-CHROME_ARG_IGNORE_CERT = '--ignore-certificate-errors'
-CHROME_ARG_INCOGNITO = '--incognito'
-CHROME_ARG_HEADLESS = '--headless'
-CHROME_ARG_DISABLE_AUTOMATION = '--disable-blink-features=AutomationControlled'
-CHROME_ARG_USER_AGENT_PREFIX = '--user-agent='
 
 # Configure logging - basic setup if not configured by the main application
 # This allows the logger to output messages if the main app doesn't set up handlers.
@@ -65,10 +54,10 @@ class ResourceManager:
             logger.debug("Initializing new HTTP session.")
             self._session = requests.Session()
             self._session.headers.update({
-                HEADER_USER_AGENT: self.config.browser_user_agent,
-                HEADER_ACCEPT: HTTP_ACCEPT_VALUE,
-                HEADER_ACCEPT_LANGUAGE: HTTP_ACCEPT_LANGUAGE_VALUE,
-                HEADER_CONNECTION: HTTP_CONNECTION_VALUE,
+                'User-Agent': self.config.browser_user_agent,
+                'Accept': HTTP_ACCEPT_VALUE,
+                'Accept-Language': HTTP_ACCEPT_LANGUAGE_VALUE,
+                'Connection': HTTP_CONNECTION_VALUE,
             })
         
         try:
@@ -92,19 +81,19 @@ class ResourceManager:
                 options = Options()
                 
                 if self.config.browser_ignore_cert_errors:
-                    options.add_argument(CHROME_ARG_IGNORE_CERT)
+                    options.add_argument('--ignore-certificate-errors')
 
                 if self.config.browser_incognito:
-                    options.add_argument(CHROME_ARG_INCOGNITO)
+                    options.add_argument('--incognito')
 
                 if self.config.browser_headless:
-                    options.add_argument(CHROME_ARG_HEADLESS)
+                    options.add_argument('--headless')
 
                 if self.config.browser_disable_automation:
-                    options.add_argument(CHROME_ARG_DISABLE_AUTOMATION)
+                    options.add_argument('--disable-blink-features=AutomationControlled')
 
                 if self.config.browser_user_agent:
-                    options.add_argument(f'{CHROME_ARG_USER_AGENT_PREFIX}{self.config.browser_user_agent}')
+                    options.add_argument(f'--user-agent={self.config.browser_user_agent}')
                 
                 # Add Chrome performance logging (optional, can be noisy)
                 # options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})

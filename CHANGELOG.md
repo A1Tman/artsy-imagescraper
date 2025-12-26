@@ -5,66 +5,66 @@ All notable changes to the Artsy Image Scraper project will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3] - 2025-12-26
+
+### Fixed My Own Mess
+
+Yeah so turns out adding 70+ constants was overkill. Went back and nuked the stupid ones.
+
+**What got axed:**
+- `ARTWORK_SLUG_INDEX = 1` - bro just write `[1]`
+- `PERCENTAGE_MULTIPLIER = 100` - it's called a percentage for a reason
+- `PIP_INSTALL_CMD = 'install'` - these are literally just pip commands
+- Single-use margins like `TITLE_MARGIN_BOTTOM = 8` - not every number needs a name
+
+Removed 36+ pointless constants across the codebase. If it's only used once and the value is obvious, it doesn't need to be a constant.
+
+**What stayed:**
+- Colors used 20+ times (`FONT_ARIAL`, `COLOR_DARK_BLUE`)
+- Complex regex patterns that look like line noise
+- Security stuff (`WINDOWS_FORBIDDEN_DIRS`, `UNIX_FORBIDDEN_DIRS`)
+- Config that might actually change
+
+Net result: -24 lines, way more readable. Sometimes less abstraction is better.
+
+---
+
 ## [2.2] - 2025-12-22
 
-### 🎉 Major Improvements
+### Major Improvements
 
-#### Added
-- **JSON-LD Structured Data Extraction**: Primary extraction method for Artsy.net
-  - Parses `<script type="application/ld+json">` tags for reliable artist/artwork identification
-  - Extracts high-quality image URLs directly from structured data
-  - New functions: `extract_json_ld_data()`, `extract_artsy_info_from_json_ld()`, `get_nested_value()`
-- **Multi-Strategy Image Extraction**: Implements 4-tier fallback system
-  1. JSON-LD structured data (highest quality)
-  2. Preload link tags (`<link rel="preload">`)
-  3. Open Graph meta tags (`<meta property="og:image">`)
-  4. Traditional img tag parsing (fallback)
-- **CDN URL Unwrapping**: New `extract_original_image_url()` function
-  - Extracts original high-resolution images from Artsy's CDN wrapper URLs
-  - Configurable regex patterns in site config
-  - Handles double URL-encoded parameters
-- **Enhanced Configuration**: Extended `site_configs` for Artsy.net
-  - `use_json_ld`: Enable/disable JSON-LD extraction
-  - `json_ld_selectors`: Configurable paths for data extraction
-  - `cdn_patterns`: Regex patterns for CDN URL parsing
+Rewrote the entire image extraction logic for Artsy.net. Old code was fragile and downloaded low-res versions.
 
-#### Changed
-- **Improved Error Handling**: Replaced all bare `except:` clauses with specific exception types
-  - Better error messages for debugging
-  - Proper exception logging in verbose mode
-- **Enhanced Type Hints**: Added comprehensive type annotations
-  - `extract_artsy_info() -> Tuple[str, str]`
-  - `extract_generic_info() -> Tuple[str, str]`
-  - `extract_images_from_page() -> Set[str]`
-  - Added `Tuple`, `Set`, `List` imports
-- **Better Logging**: Verbose mode now shows which extraction strategy succeeded
-  - Clear indication when JSON-LD extraction works
-  - Fallback notifications for debugging
-  - URL-based fallback preparation logged
+**New extraction system:**
+- JSON-LD structured data extraction (parses `<script type="application/ld+json">` tags)
+- 4-tier fallback: JSON-LD → preload links → og:image meta tags → img tags
+- CDN URL unwrapping to get original high-res images instead of scaled versions
+- Added `extract_json_ld_data()`, `extract_artsy_info_from_json_ld()`, `get_nested_value()`
 
-#### Fixed
-- **Artsy Image Extraction**: Complete rewrite of image URL extraction logic
-  - OLD: Searched all `<div>` tags with brittle string operations
-  - NEW: Targeted extraction from structured data and preload tags
-- **High-Resolution Images**: Now correctly extracts original image URLs
-  - Properly decodes Artsy's CDN parameters
-  - No longer downloads scaled-down versions
-- **Artist/Artwork Detection**: More reliable metadata extraction
-  - JSON-LD provides canonical artist/artwork names
-  - Better fallback chain: JSON-LD → CSS selectors → URL parsing
+**Config improvements:**
+- Extended `site_configs` for Artsy with `use_json_ld`, `json_ld_selectors`, `cdn_patterns`
+- Configurable regex patterns for CDN URL parsing
+- Handles double URL-encoded parameters
 
-### 📝 Documentation
-- Updated README.md with comprehensive feature descriptions
-- Added installation instructions and prerequisites
-- Documented GUI and CLI usage modes
-- Added troubleshooting section
-- Created this CHANGELOG.md
+**Code quality:**
+- Replaced all bare `except:` with specific exception types
+- Added type hints: `-> Tuple[str, str]`, `-> Set[str]`, etc.
+- Verbose mode shows which extraction strategy worked
+- Better error messages for debugging
 
-### 🔧 Technical Details
-- Added `json` module import for JSON-LD parsing
-- BeautifulSoup parser preference: lxml → html.parser fallback
-- Regex-based URL parameter extraction with configurable patterns
-- Improved code organization with dedicated helper functions
+**Fixes:**
+- Artsy extraction completely rewritten (old: searched divs with string ops, new: structured data)
+- Actually downloads high-res images now (properly decodes CDN params)
+- More reliable artist/artwork detection with fallback chain
+
+**Docs:**
+- Updated README with installation, usage, troubleshooting
+- Created this CHANGELOG
+
+**Technical:**
+- BeautifulSoup parser: lxml with html.parser fallback
+- Regex-based URL parameter extraction
+- Better code organization
 
 ---
 
