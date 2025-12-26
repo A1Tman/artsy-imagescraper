@@ -41,7 +41,6 @@ JSON_LD_SCRIPT_TYPE = 'application/ld+json'
 JSON_LD_TYPE_KEY = '@type'
 JSON_LD_GRAPH_KEY = '@graph'
 JSON_LD_ARTWORK_TYPE = 'VisualArtwork'
-JSON_LD_UNKNOWN_TYPE = 'unknown'
 
 # Default values for extraction fallbacks
 DEFAULT_ARTIST_NAME = "unknown"
@@ -50,9 +49,6 @@ DEFAULT_ARTWORK_NAME = "artwork"
 # Artsy-specific constants
 ARTSY_DOMAIN = "artsy.net"
 ARTSY_ARTWORK_PATH = '/artwork/'
-ARTWORK_SLUG_INDEX = 1
-ARTIST_NAME_WORD_COUNT = 2
-SLUG_PARTS_MIN_FOR_TITLE = 2
 
 # Site type identifiers
 SITE_TYPE_ARTSY = "artsy"
@@ -61,19 +57,7 @@ SITE_TYPE_GENERIC = "generic"
 # Generic page extraction
 MIN_HEADING_LEVEL = 1
 MAX_HEADING_LEVEL = 4
-HEADING_WAIT_DIVISOR = 3
 HEADING_MAX_LENGTH = 100
-MIN_HEADINGS_FOR_BOTH = 2
-ARTIST_HEADING_INDEX = 0
-ARTWORK_HEADING_INDEX = 1
-MIN_PATH_PARTS_FOR_ARTWORK = 1
-DOMAIN_PARTS_THRESHOLD = 2
-
-# URL schemes
-HTTP_SCHEME = 'http://'
-HTTPS_SCHEME = 'https://'
-DATA_URI_PREFIX = 'data:image'
-SVG_EXTENSION = '.svg'
 
 # Image content types mapping
 IMAGE_CONTENT_TYPES = {
@@ -83,18 +67,11 @@ IMAGE_CONTENT_TYPES = {
     'image/webp': '.webp',
     'image/bmp': '.bmp'
 }
-IMAGE_CONTENT_TYPE_PREFIX = 'image/'
 DEFAULT_IMAGE_EXTENSION = '.jpg'
-
-# Progress tracking
-PERCENTAGE_MULTIPLIER = 100
 
 # Configuration
 DEFAULT_CONFIG_FILENAME = "scraper_config.json"
 EXIT_COMMAND = 'exit'
-
-# Regex group indices
-REGEX_FIRST_MATCH_GROUP = 1
 
 
 def clean_filename(name: str) -> str:
@@ -132,7 +109,7 @@ def extract_json_ld_data(soup: BeautifulSoup, verbose: bool = False) -> List[Dic
             data = json.loads(script.string)
             json_ld_data.append(data)
             if verbose:
-                print(f"Found JSON-LD data with @type: {data.get(JSON_LD_TYPE_KEY, JSON_LD_UNKNOWN_TYPE)}")
+                print(f"Found JSON-LD data with @type: {data.get(JSON_LD_TYPE_KEY, 'unknown')}")
         except (json.JSONDecodeError, AttributeError) as e:
             if verbose:
                 print(f"Error parsing JSON-LD: {e}")
@@ -218,10 +195,10 @@ def extract_artsy_info(url: str, driver: webdriver.Chrome, config: ScraperConfig
     url_path = urlparse(url).path
     fallback_artist, fallback_artwork = DEFAULT_ARTIST_NAME, DEFAULT_ARTWORK_NAME
     if ARTSY_ARTWORK_PATH in url_path:
-        slug = url_path.split(ARTSY_ARTWORK_PATH)[ARTWORK_SLUG_INDEX].strip('/')
+        slug = url_path.split(ARTSY_ARTWORK_PATH)[1].strip('/')
         slug_parts = slug.split('-')
-        fallback_artist = ' '.join(slug_parts[:ARTIST_NAME_WORD_COUNT]).title()
-        fallback_artwork = ' '.join(slug_parts[ARTIST_NAME_WORD_COUNT:]).title() if len(slug_parts) > SLUG_PARTS_MIN_FOR_TITLE else slug.title()
+        fallback_artist = ' '.join(slug_parts[:2]).title()
+        fallback_artwork = ' '.join(slug_parts[2:]).title() if len(slug_parts) > 2 else slug.title()
         if verbose:
             print(f"URL-based fallback prepared: Artist='{fallback_artist}', Artwork='{fallback_artwork}'")
 
@@ -292,7 +269,7 @@ def extract_generic_info(url: str, driver: webdriver.Chrome, config: ScraperConf
             # Use WebDriverWait for finding headings if possible, or at least handle timeouts
             for h_level in range(MIN_HEADING_LEVEL, MAX_HEADING_LEVEL):
                 try:
-                    elements = WebDriverWait(driver, config.element_wait_timeout / HEADING_WAIT_DIVISOR).until( # Shorter wait per heading level
+                    elements = WebDriverWait(driver, config.element_wait_timeout / 3).until(  # Shorter wait per heading level
                         EC.presence_of_all_elements_located((By.TAG_NAME, f'h{h_level}'))
                     )
                     for element in elements:
@@ -305,14 +282,14 @@ def extract_generic_info(url: str, driver: webdriver.Chrome, config: ScraperConf
                         print(f"No h{h_level} headings found: {e}")
                     continue
             
-            if len(headings) >= MIN_HEADINGS_FOR_BOTH:
-                artist_name, artwork_name = headings[ARTIST_HEADING_INDEX], headings[ARTWORK_HEADING_INDEX]
+            if len(headings) >= 2:
+                artist_name, artwork_name = headings[0], headings[1]
             elif len(headings) == 1:
                 artist_name = path_parts[0].replace('-', ' ').title() if path_parts else DEFAULT_ARTIST_NAME
                 artwork_name = headings[0]
             else:
                 artist_name = path_parts[0].replace('-', ' ').title() if path_parts else DEFAULT_ARTIST_NAME
-                artwork_name = path_parts[-1].replace('-', ' ').title() if len(path_parts) > MIN_PATH_PARTS_FOR_ARTWORK else page_title or DEFAULT_ARTWORK_NAME
+                artwork_name = path_parts[-1].replace('-', ' ').title() if len(path_parts) > 1 else page_title or DEFAULT_ARTWORK_NAME
             
             if verbose: print(f"Page-based extraction (generic): Artist='{artist_name}', Artwork='{artwork_name}'")
             return artist_name, artwork_name
@@ -329,7 +306,7 @@ def extract_generic_info(url: str, driver: webdriver.Chrome, config: ScraperConf
     except Exception as e:
         if verbose: print(f"Error in generic info extraction: {e}")
         domain_parts = parsed_url.netloc.split('.')
-        site_name = domain_parts[1] if len(domain_parts) > DOMAIN_PARTS_THRESHOLD else domain_parts[0]
+        site_name = domain_parts[1] if len(domain_parts) > 2 else domain_parts[0]
         return site_name.title(), DEFAULT_ARTWORK_NAME
 
 # def setup_webdriver... # This function is removed, ResourceManager handles it.
@@ -350,7 +327,7 @@ def extract_original_image_url(cdn_url: str, config: ScraperConfig, verbose: boo
     for pattern in cdn_patterns:
         match = re.search(pattern, decoded_url)
         if match:
-            extracted_url = unquote(match.group(REGEX_FIRST_MATCH_GROUP))  # Double decode in case it's encoded twice
+            extracted_url = unquote(match.group(1))  # Double decode in case it's encoded twice
             if verbose:
                 print(f"Extracted original URL: {extracted_url}")
             return extracted_url
@@ -427,8 +404,8 @@ def extract_images_from_page(soup: BeautifulSoup, url: str, site_type: str, conf
         for img in img_tags:
             if 'src' in img.attrs:
                 src = img['src']
-                if DATA_URI_PREFIX in src or SVG_EXTENSION in src: continue
-                if not src.startswith((HTTP_SCHEME, HTTPS_SCHEME)):
+                if 'data:image' in src or '.svg' in src: continue
+                if not src.startswith(('http://', 'https://')):
                     base_url_scheme = urlparse(url).scheme
                     base_url_netloc = urlparse(url).netloc
                     src = f"{base_url_scheme}://{base_url_netloc.rstrip('/')}/{src.lstrip('/')}"
@@ -498,7 +475,7 @@ def download_images(unique_urls: Set[str], artist_dir: str, artwork_name: str, c
                     image_path = os.path.join(artist_dir, f"{base_name_for_path}_{counter}{file_extension}")
                     counter += 1
                 
-                if not content_type_header.startswith(IMAGE_CONTENT_TYPE_PREFIX) or len(response.content) < config.min_image_size:
+                if not content_type_header.startswith('image/') or len(response.content) < config.min_image_size:
                     msg = f"Skipping small/non-image (Type: {content_type_header}, Size: {len(response.content)}): {os.path.basename(img_url)}"
                     if verbose: print(msg)
                     if progress_callback: progress_callback({'type': 'message', 'value': msg})
@@ -510,7 +487,7 @@ def download_images(unique_urls: Set[str], artist_dir: str, artwork_name: str, c
                 dl_msg = f"DL {os.path.basename(image_path)} ({i+1}/{total_to_download})"
                 if verbose: print(dl_msg)
                 if progress_callback:
-                    percentage = int(((i + 1) / total_to_download) * PERCENTAGE_MULTIPLIER) if total_to_download else PERCENTAGE_MULTIPLIER
+                    percentage = int(((i + 1) / total_to_download) * 100) if total_to_download else 100
                     progress_callback({'type': 'percentage', 'value': percentage})
                     progress_callback({'type': 'message', 'value': dl_msg})
                     
