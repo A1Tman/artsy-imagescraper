@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 from typing import Any, Dict, Optional
 
 # Import the unified scraper module
-from improved_scraper import scrape_images
+from improved_scraper import scrape_images, OperationCancelledError
 # Import config using absolute import instead of relative import
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 if _MODULE_DIR not in sys.path:
@@ -287,10 +287,6 @@ class ScraperThread(threading.Thread):
             self.signals.finished.emit(0)
         except Exception as e:
             self.signals.error.emit(str(e))
-
-class OperationCancelledError(Exception):
-    """Custom exception for cancelled operations."""
-    pass
 
 class ImageScraperApp(QMainWindow):
     def __init__(self) -> None:
@@ -712,7 +708,8 @@ class ImageScraperApp(QMainWindow):
             if prog_type == PROG_PERCENTAGE:
                 # Progress bar range is already set to 0-100 in start_scraping
                 self.progress_bar.setValue(int(prog_value))
-                self.status_label.setText(f"Scraping: {int(prog_value)}%")
+                op_label = "Scraping" if self.active_operation == "scraping" else "Updating"
+                self.status_label.setText(f"{op_label}: {int(prog_value)}%")
             elif prog_type == PROG_MESSAGE:
                 self.status_label.setText(str(prog_value)[:STATUS_TEXT_MAX_LENGTH])
                 self.add_log_message(str(prog_value))
@@ -726,7 +723,7 @@ class ImageScraperApp(QMainWindow):
             self.add_log_message(f"Unknown progress type: {str(progress_update)}")
         
     def operation_common_finish_ui(self) -> None:
-        self.start_button.setEnabled(True)
+        self.validate_url_input_live()  # Re-enables start button only if URL is valid
         self.update_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.progress_bar.setVisible(False)
@@ -763,8 +760,13 @@ class ImageScraperApp(QMainWindow):
             # Check if path tries to access sensitive system directories
             forbidden_prefixes = []
             if sys.platform == PLATFORM_WINDOWS:
-                # Windows: Prevent access to system directories
-                forbidden_prefixes = [os.path.abspath(path) for path in WINDOWS_FORBIDDEN_DIRS]
+                # Windows: Prevent access to system directories.
+                # Use env vars so the check works regardless of drive letter or locale.
+                forbidden_prefixes = [
+                    os.path.abspath(os.environ.get('SystemRoot', WINDOWS_FORBIDDEN_DIRS[0])),
+                    os.path.abspath(os.environ.get('ProgramFiles', WINDOWS_FORBIDDEN_DIRS[1])),
+                    os.path.abspath(os.environ.get('ProgramFiles(x86)', WINDOWS_FORBIDDEN_DIRS[2])),
+                ]
             else:
                 # Unix-like: Prevent access to system directories
                 forbidden_prefixes = UNIX_FORBIDDEN_DIRS
