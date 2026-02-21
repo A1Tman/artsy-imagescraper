@@ -83,6 +83,20 @@ config = ScraperConfig(
 
 Site-specific configs for Artsy.net are in the `site_configs` dict and can be extended for other sites.
 
+## What's New in v2.4
+
+Bug fix and security hardening release:
+
+- Fixed verbose mode being silently broken during image extraction (argument order bug)
+- Fixed cancel operation showing an error dialog instead of a clean cancellation
+- Fixed domain-matching false-positive that could apply the wrong site config
+- Fixed h4 headings never being searched (off-by-one in range)
+- Fixed start button re-enabling after operations even with an invalid URL in the input
+- Windows system-directory protection now uses `%SystemRoot%` / `%ProgramFiles%` env vars instead of hardcoded `C:\` paths
+- Config loader now validates field types before applying values from JSON
+
+See [CHANGELOG.md](CHANGELOG.md) for full details.
+
 ## What's New in v2.2
 
 Major improvements to reliability and code quality:

@@ -73,11 +73,17 @@ class ScraperConfig:
                 # Update config fields from loaded data
                 for key, value in config_data.items():
                     if hasattr(config, key):
+                        current = getattr(config, key)
                         # Handle nested dicts like site_configs carefully
-                        if isinstance(getattr(config, key), dict) and isinstance(value, dict):
-                            getattr(config, key).update(value)
-                        else:
+                        if isinstance(current, dict) and isinstance(value, dict):
+                            current.update(value)
+                        elif type(current) == type(value) or (
+                            isinstance(current, (int, float)) and isinstance(value, (int, float))
+                        ):
                             setattr(config, key, value)
+                        else:
+                            print(f"Warning: Skipping config key '{key}': "
+                                  f"expected {type(current).__name__}, got {type(value).__name__}")
             except Exception as e:
                 print(f"Warning: Error loading configuration from {config_path}: {str(e)}")
                 print("Using default configuration.")
@@ -116,7 +122,7 @@ class ScraperConfig:
         # e.g., if domain is "sub.artsy.net", "artsy.net" should match.
         best_match_key = None
         for site_key in self.site_configs.keys():
-            if domain.endswith(site_key):
+            if domain == site_key or domain.endswith('.' + site_key):
                 if best_match_key is None or len(site_key) > len(best_match_key):
                     best_match_key = site_key
         

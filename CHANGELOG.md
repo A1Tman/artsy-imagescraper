@@ -5,6 +5,28 @@ All notable changes to the Artsy Image Scraper project will be documented in thi
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4] - 2026-02-21
+
+### Fixed
+
+- **Wrong argument passed to `extract_images_from_page`** — `verbose` was landing in the `driver` parameter, so verbose mode produced no output during the image-extraction phase.
+- **Cancel triggered error dialog instead of clean cancel** — `OperationCancelledError` was being caught and wrapped by the generic `except Exception` block in `scrape_images`, so the cancellation reached the GUI as an error message. Now re-raised without wrapping.
+- **`OperationCancelledError` moved to `improved_scraper.py`** — was defined in `scraper_gui.py`, making it impossible for `improved_scraper.py` to catch it specifically. Now imported in `scraper_gui.py`.
+- **Domain matching false-positive in `get_site_config`** — `domain.endswith(site_key)` matched `notartsy.net` against `artsy.net`. Fixed to require exact match or a dot boundary.
+- **`parsed_url` unbound in outer except in `extract_generic_info`** — referenced in the except block but defined inside the try. Moved before the try.
+- **Off-by-one: h4 headings never searched** — `range(MIN_HEADING_LEVEL, MAX_HEADING_LEVEL)` excluded h4. Changed to `MAX_HEADING_LEVEL + 1`.
+- **Start button re-enabled unconditionally after operations** — `operation_common_finish_ui` always set `start_button.setEnabled(True)`. Now calls `validate_url_input_live()` so the button stays disabled if the URL is empty or invalid.
+- **"Scraping:" label shown during package updates** — status label now uses the active operation name.
+- **`import copy` inside `while True` loop** — moved to top-level imports.
+
+### Security
+
+- **Windows forbidden-directory check used hardcoded `C:\` paths** — now reads `%SystemRoot%`, `%ProgramFiles%`, and `%ProgramFiles(x86)%` env vars so the check works when Windows is installed on a non-C: drive or in a localized path.
+- **Config loader applied `setattr` without type validation** — arbitrary values from a config file could override typed fields. Now validates that the loaded value type matches the expected type before applying.
+- **Hardcoded `"artsy.net"` string in `scrape_images`** — replaced with `ARTSY_DOMAIN` and `SITE_TYPE_*` constants for consistency.
+
+---
+
 ## [2.3] - 2025-12-26
 
 ### Fixed My Own Mess

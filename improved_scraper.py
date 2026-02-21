@@ -3,6 +3,7 @@ import sys
 import re
 import time
 import json
+import copy
 import requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -72,6 +73,11 @@ DEFAULT_IMAGE_EXTENSION = '.jpg'
 # Configuration
 DEFAULT_CONFIG_FILENAME = "scraper_config.json"
 EXIT_COMMAND = 'exit'
+
+
+class OperationCancelledError(Exception):
+    """Raised when a scraping operation is cancelled by the user."""
+    pass
 
 
 def clean_filename(name: str) -> str:
@@ -259,15 +265,15 @@ def extract_generic_info(url: str, driver: webdriver.Chrome, config: ScraperConf
 
     Returns: (artist_name, artwork_name)
     """
+    parsed_url = urlparse(url)
     try:
-        parsed_url = urlparse(url)
         path_parts = parsed_url.path.strip('/').split('/')
 
         try:
             page_title = driver.title
             headings = []
             # Use WebDriverWait for finding headings if possible, or at least handle timeouts
-            for h_level in range(MIN_HEADING_LEVEL, MAX_HEADING_LEVEL):
+            for h_level in range(MIN_HEADING_LEVEL, MAX_HEADING_LEVEL + 1):
                 try:
                     elements = WebDriverWait(driver, config.element_wait_timeout / 3).until(  # Shorter wait per heading level
                         EC.presence_of_all_elements_located((By.TAG_NAME, f'h{h_level}'))
@@ -525,7 +531,7 @@ def scrape_images(url: str, config_input: Optional[Union[ScraperConfig, str]] = 
             
             parsed_url = urlparse(url)
             domain = parsed_url.netloc
-            site_type = "artsy" if "artsy.net" in domain else "generic"
+            site_type = SITE_TYPE_ARTSY if ARTSY_DOMAIN in domain else SITE_TYPE_GENERIC
             
             msg = f"Detected site type: {site_type} for domain: {domain}"
             if verbose: print(msg)
@@ -573,7 +579,7 @@ def scrape_images(url: str, config_input: Optional[Union[ScraperConfig, str]] = 
                 except ImportError:
                     soup = BeautifulSoup(html, FALLBACK_HTML_PARSER)
                 
-                unique_urls = extract_images_from_page(soup, url, site_type, config, verbose)
+                unique_urls = extract_images_from_page(soup, url, site_type, config, driver, verbose)
                 msg = f"Found {len(unique_urls)} potential image URLs."
                 if verbose: print(msg)
                 if progress_callback: progress_callback({'type': 'message', 'value': msg})
@@ -588,7 +594,9 @@ def scrape_images(url: str, config_input: Optional[Union[ScraperConfig, str]] = 
             if progress_callback: progress_callback({'type': 'message', 'value': msg})
                 
             return num_images_downloaded
-            
+
+        except OperationCancelledError:
+            raise  # Re-raise without wrapping so callers can detect cancellation cleanly
         except Exception as e:
             err_msg = f"Error during scraping: {str(e)}"
             if verbose: print(err_msg)
@@ -623,7 +631,6 @@ def main():
         
         # Create a config instance for this specific run
         # Start with a deepcopy of the loaded/default config to avoid modifying it globally
-        import copy
         current_run_config = copy.deepcopy(config)
         if custom_output_dir_prompt:
             current_run_config.output_directory = custom_output_dir_prompt
