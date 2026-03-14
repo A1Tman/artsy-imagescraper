@@ -39,7 +39,7 @@ python gui.py
 
 ### GUI Mode
 1. Run `python gui.py`
-2. Enter an Artsy URL or select one from the examples dropdown
+2. Enter the page URL you want to scrape
 3. Choose where to save the images
 4. Use `Check Environment` to compare installed packages against `requirements.txt` when needed
 5. Use `Sync Dependencies` to install the exact pinned dependency set from the lock file
@@ -50,13 +50,6 @@ Images are saved to: `{save_location}/{artist_name}/{artwork_title}.jpg`
 
 ### Command-Line Mode
 Run `python scraper.py` for an interactive command-line interface with verbose output.
-
-### Example URLs
-Try these pages:
-- https://www.artsy.net/artwork/ellen-von-unwerth-isabelle
-- https://www.artsy.net/artwork/ed-ruscha-history-kids-236
-- https://www.artsy.net/artwork/shepard-fairey-shepard-fairey-screenprint-opt-art-green-gradient-street-contemporary-art-obey-giant
-- https://arstechnica.com/tech-policy/2026/03/trumps-doj-is-not-falling-for-sam-bankman-frieds-maga-makeover-on-x/
 
 ## Project Structure
 
