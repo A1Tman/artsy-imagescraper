@@ -5,7 +5,7 @@ import subprocess
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
                             QPushButton, QLineEdit, QLabel, QWidget, QFileDialog, 
                             QProgressBar, QMessageBox, QTextEdit, QGroupBox, 
-                            QTabWidget, QListWidget, QComboBox)
+                            QTabWidget, QListWidget)
 from PyQt5.QtGui import QFont, QTextCursor
 from PyQt5.QtCore import Qt, pyqtSignal, QObject
 import json
@@ -455,21 +455,6 @@ class ImageScraperApp(QMainWindow):
         url_layout = QVBoxLayout()
         url_layout.setSpacing(5)
 
-        url_examples_label = QLabel("Example URLs:")
-        url_examples_label.setFont(QFont(FONT_ARIAL, SMALL_FONT_SIZE))
-        url_layout.addWidget(url_examples_label)
-
-        self.url_examples = QComboBox()
-        self.url_examples.setFont(QFont(FONT_ARIAL, NORMAL_FONT_SIZE))
-        self.url_examples.addItem("Select an example...")
-        for example_url in self.scraper_config.example_urls:
-            self.url_examples.addItem(example_url)
-        self.url_examples.setEnabled(bool(self.scraper_config.example_urls))
-        if not self.scraper_config.example_urls:
-            self.url_examples.setToolTip("No example URLs are configured.")
-        self.url_examples.currentIndexChanged.connect(self.on_example_selected)
-        url_layout.addWidget(self.url_examples)
-
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText(URL_INPUT_PLACEHOLDER)
         self.url_input.setFont(QFont(FONT_ARIAL, NORMAL_FONT_SIZE))
@@ -675,11 +660,6 @@ class ImageScraperApp(QMainWindow):
         except Exception:
             return False
 
-    def on_example_selected(self, index: int) -> None:
-        if index > 0:
-            self.url_input.setText(self.url_examples.currentText().strip())
-            self.validate_url_input_live() # Validate after setting example
-
     def browse_directory(self) -> None:
         """Open file dialog to select save directory and update settings."""
         current_dir = self.save_dir_input.text()
@@ -696,7 +676,6 @@ class ImageScraperApp(QMainWindow):
         """Clear URL input and reset UI to initial state."""
         self.url_input.clear()
         self.status_label.setText(STATUS_READY)
-        self.url_examples.setCurrentIndex(0)
         self.validate_url_input_live()
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(False)

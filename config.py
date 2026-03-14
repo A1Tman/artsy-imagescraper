@@ -36,12 +36,6 @@ class ScraperConfig:
     max_download_size: int = 50 * 1024 * 1024  # Maximum image size in bytes (~50MB) to avoid unbounded downloads
     preferred_extensions: List[str] = field(default_factory=lambda: [".jpg", ".jpeg", ".png", ".webp", ".bmp"]) # Added .bmp
 
-    # Optional GUI example URLs
-    example_urls: List[str] = field(default_factory=lambda: [
-        "https://www.artsy.net/artwork/robin-wen-blue-rave-9-portrait-de-lila",
-        "https://arstechnica.com/tech-policy/2026/03/trumps-doj-is-not-falling-for-sam-bankman-frieds-maga-makeover-on-x/",
-    ])
-    
     # Filtering
     unwanted_image_terms: List[str] = field(default_factory=lambda: [
         'logo', 'icon', 'avatar', 'banner', 'button', 'thumbnail', 

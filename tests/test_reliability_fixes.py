@@ -69,23 +69,6 @@ class ConfigValidationTests(unittest.TestCase):
         finally:
             os.remove(config_path)
 
-    def test_example_urls_can_be_loaded_from_config(self) -> None:
-        file_handle, config_path = tempfile.mkstemp(suffix=".json")
-        os.close(file_handle)
-        try:
-            expected_urls = [
-                "https://example.com/a?token=secret",
-                "https://example.com/b",
-            ]
-            with open(config_path, "w", encoding="utf-8") as config_file:
-                json.dump({"example_urls": expected_urls}, config_file)
-
-            config = ScraperConfig.load(config_path)
-            self.assertEqual(config.example_urls, expected_urls)
-        finally:
-            os.remove(config_path)
-
-
 class HistorySanitizationTests(unittest.TestCase):
     def test_sanitize_history_url_strips_query_and_fragment(self) -> None:
         self.assertEqual(
