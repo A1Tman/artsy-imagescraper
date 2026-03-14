@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt5.QtCore import QCoreApplication
 
 from config import ScraperConfig, domain_matches
-from scraper import OperationCancelledError, is_artsy_domain
+from scraper import OperationCancelledError, download_images, is_artsy_domain
 from gui import (
     ScraperThread,
     build_environment_status,
@@ -17,6 +17,8 @@ from gui import (
     is_same_or_child_path,
     normalize_package_name,
     parse_locked_requirements,
+    sanitize_history_item_text,
+    sanitize_history_url,
 )
 
 
@@ -66,6 +68,40 @@ class ConfigValidationTests(unittest.TestCase):
             self.assertEqual(config.download_timeout, 25)
         finally:
             os.remove(config_path)
+
+    def test_example_urls_can_be_loaded_from_config(self) -> None:
+        file_handle, config_path = tempfile.mkstemp(suffix=".json")
+        os.close(file_handle)
+        try:
+            expected_urls = [
+                "https://example.com/a?token=secret",
+                "https://example.com/b",
+            ]
+            with open(config_path, "w", encoding="utf-8") as config_file:
+                json.dump({"example_urls": expected_urls}, config_file)
+
+            config = ScraperConfig.load(config_path)
+            self.assertEqual(config.example_urls, expected_urls)
+        finally:
+            os.remove(config_path)
+
+
+class HistorySanitizationTests(unittest.TestCase):
+    def test_sanitize_history_url_strips_query_and_fragment(self) -> None:
+        self.assertEqual(
+            sanitize_history_url("https://example.com/path/image?id=123#section"),
+            "https://example.com/path/image",
+        )
+
+    def test_sanitize_history_item_text_rewrites_legacy_history_entry(self) -> None:
+        original_entry = (
+            "2026-03-14 10:00:00 - "
+            "https://example.com/path/image?id=123#section (2 images)"
+        )
+        self.assertEqual(
+            sanitize_history_item_text(original_entry),
+            "2026-03-14 10:00:00 - https://example.com/path/image (2 images)",
+        )
 
 
 class EnvironmentStatusTests(unittest.TestCase):
@@ -160,6 +196,73 @@ class ScraperThreadCancellationTests(unittest.TestCase):
 
         self.assertEqual(cancelled_messages, ["Scraping cancelled."])
         self.assertEqual(finished_counts, [])
+
+
+class DownloadLimitTests(unittest.TestCase):
+    class FakeResponse:
+        def __init__(self, chunks, headers):
+            self._chunks = chunks
+            self.headers = headers
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def iter_content(self, chunk_size=8192):
+            return iter(self._chunks)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeSession:
+        def __init__(self, response):
+            self.response = response
+            self.last_kwargs = None
+
+        def get(self, url, **kwargs):
+            self.last_kwargs = kwargs
+            return self.response
+
+    class FakeSessionContext:
+        def __init__(self, session):
+            self.session = session
+
+        def __enter__(self):
+            return self.session
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeManager:
+        def __init__(self, session):
+            self.session = session
+
+        def get_session(self):
+            return DownloadLimitTests.FakeSessionContext(self.session)
+
+    def test_download_images_streams_and_removes_oversized_partial_file(self) -> None:
+        response = self.FakeResponse(
+            chunks=[b"1234", b"56"],
+            headers={"content-type": "image/jpeg"},
+        )
+        session = self.FakeSession(response)
+        manager = self.FakeManager(session)
+        config = ScraperConfig(min_image_size=1, max_download_size=5)
+
+        with tempfile.TemporaryDirectory() as artist_dir:
+            count = download_images(
+                {"https://example.com/image.jpg"},
+                artist_dir,
+                "artwork",
+                config,
+                manager,
+            )
+
+            self.assertEqual(count, 0)
+            self.assertTrue(session.last_kwargs["stream"])
+            self.assertEqual(os.listdir(artist_dir), [])
 
 
 if __name__ == "__main__":
