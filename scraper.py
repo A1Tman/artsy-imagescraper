@@ -100,6 +100,7 @@ DEFAULT_IMAGE_EXTENSION = '.jpg'
 DEFAULT_CONFIG_FILENAME = "scraper_config.json"
 EXIT_COMMAND = 'exit'
 DISPLAY_ARROW = "->"
+DOWNLOAD_CHUNK_SIZE = 8192
 
 # Artsy image candidate scoring
 ARTSY_VARIANT_PRIORITY = {
@@ -725,6 +726,19 @@ def extract_images_from_page(soup: BeautifulSoup, url: str, site_type: str, conf
     return unique_urls
 
 
+def parse_content_length(content_length_header: Optional[str]) -> Optional[int]:
+    """Parse a Content-Length header value when it is present and valid."""
+    if not content_length_header:
+        return None
+
+    try:
+        content_length = int(content_length_header)
+    except (TypeError, ValueError):
+        return None
+
+    return content_length if content_length >= 0 else None
+
+
 def download_images(unique_urls: Set[str], artist_dir: str, artwork_name: str, config: ScraperConfig, manager: ResourceManager, verbose: bool = False, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> int:
     """Download images using ResourceManager for session and config for settings.
 
@@ -745,38 +759,82 @@ def download_images(unique_urls: Set[str], artist_dir: str, artwork_name: str, c
 
     with manager.get_session() as session: # Use session from ResourceManager
         for i, img_url in enumerate(unique_urls):
+            image_path = None
             try:
-                response = session.get(img_url, timeout=config.download_timeout)
-                response.raise_for_status()
+                with session.get(img_url, timeout=config.download_timeout, stream=True) as response:
+                    response.raise_for_status()
 
-                content_type_header = response.headers.get('content-type', '').lower()
-                file_extension = DEFAULT_IMAGE_EXTENSION
+                    content_type_header = response.headers.get('content-type', '').lower()
+                    content_length = parse_content_length(response.headers.get('content-length'))
+                    file_extension = DEFAULT_IMAGE_EXTENSION
 
-                # Map content type to extension
-                for content_type, ext in IMAGE_CONTENT_TYPES.items():
-                    if content_type in content_type_header:
-                        file_extension = ext
-                        break
-                else:
-                    # If no content type match, try to get extension from URL
-                    path_ext = os.path.splitext(urlparse(img_url).path)[1].lower()
-                    if path_ext in config.preferred_extensions:
-                        file_extension = path_ext
+                    # Map content type to extension
+                    for content_type, ext in IMAGE_CONTENT_TYPES.items():
+                        if content_type in content_type_header:
+                            file_extension = ext
+                            break
+                    else:
+                        # If no content type match, try to get extension from URL
+                        path_ext = os.path.splitext(urlparse(img_url).path)[1].lower()
+                        if path_ext in config.preferred_extensions:
+                            file_extension = path_ext
 
-                image_path = os.path.join(artist_dir, artwork_name + file_extension)
-                counter = 1
-                base_name_for_path = artwork_name
-                while os.path.exists(image_path):
-                    image_path = os.path.join(artist_dir, f"{base_name_for_path}_{counter}{file_extension}")
-                    counter += 1
-                
-                if not content_type_header.startswith('image/') or len(response.content) < config.min_image_size:
-                    msg = f"Skipping small/non-image (Type: {content_type_header}, Size: {len(response.content)}): {os.path.basename(img_url)}"
-                    if verbose: print(msg)
-                    if progress_callback: progress_callback({'type': 'message', 'value': msg})
-                    continue
-                
-                with open(image_path, "wb") as file: file.write(response.content)
+                    image_path = os.path.join(artist_dir, artwork_name + file_extension)
+                    counter = 1
+                    base_name_for_path = artwork_name
+                    while os.path.exists(image_path):
+                        image_path = os.path.join(artist_dir, f"{base_name_for_path}_{counter}{file_extension}")
+                        counter += 1
+
+                    if not content_type_header.startswith('image/'):
+                        msg = f"Skipping non-image response (Type: {content_type_header}): {os.path.basename(img_url)}"
+                        if verbose: print(msg)
+                        if progress_callback: progress_callback({'type': 'message', 'value': msg})
+                        continue
+
+                    if content_length is not None and content_length < config.min_image_size:
+                        msg = (
+                            f"Skipping small image from headers (Type: {content_type_header}, "
+                            f"Size: {content_length}): {os.path.basename(img_url)}"
+                        )
+                        if verbose: print(msg)
+                        if progress_callback: progress_callback({'type': 'message', 'value': msg})
+                        continue
+
+                    if content_length is not None and content_length > config.max_download_size:
+                        msg = (
+                            f"Skipping oversized image from headers (Size: {content_length}, "
+                            f"Limit: {config.max_download_size}): {os.path.basename(img_url)}"
+                        )
+                        if verbose: print(msg)
+                        if progress_callback: progress_callback({'type': 'message', 'value': msg})
+                        continue
+
+                    bytes_downloaded = 0
+                    with open(image_path, "wb") as file:
+                        for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
+                            if not chunk:
+                                continue
+
+                            bytes_downloaded += len(chunk)
+                            if bytes_downloaded > config.max_download_size:
+                                raise ValueError(
+                                    f"Download exceeded max size ({bytes_downloaded} > {config.max_download_size})"
+                                )
+
+                            file.write(chunk)
+
+                    if bytes_downloaded < config.min_image_size:
+                        if os.path.exists(image_path):
+                            os.remove(image_path)
+                        msg = (
+                            f"Skipping small/non-image (Type: {content_type_header}, "
+                            f"Size: {bytes_downloaded}): {os.path.basename(img_url)}"
+                        )
+                        if verbose: print(msg)
+                        if progress_callback: progress_callback({'type': 'message', 'value': msg})
+                        continue
+
                 num_images_downloaded += 1
 
                 dl_msg = f"DL {os.path.basename(image_path)} ({i+1}/{total_to_download})"
@@ -787,10 +845,20 @@ def download_images(unique_urls: Set[str], artist_dir: str, artwork_name: str, c
                     progress_callback({'type': 'message', 'value': dl_msg})
                     
             except requests.exceptions.RequestException as e:
+                if image_path and os.path.exists(image_path):
+                    os.remove(image_path)
                 err_msg = f"Error DL {img_url}: {e}"
                 if verbose: print(err_msg)
                 if progress_callback: progress_callback({'type': 'message', 'value': err_msg})
+            except ValueError as e:
+                if image_path and os.path.exists(image_path):
+                    os.remove(image_path)
+                err_msg = f"Skipping oversized image during download: {img_url} ({e})"
+                if verbose: print(err_msg)
+                if progress_callback: progress_callback({'type': 'message', 'value': err_msg})
             except Exception as e:
+                if image_path and os.path.exists(image_path):
+                    os.remove(image_path)
                 err_msg = f"Error with {img_url}: {e}"
                 if verbose: print(err_msg)
                 if progress_callback: progress_callback({'type': 'message', 'value': err_msg})

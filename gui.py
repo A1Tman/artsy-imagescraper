@@ -246,6 +246,34 @@ def is_same_or_child_path(path: str, parent_path: str) -> bool:
     except ValueError:
         return False
 
+
+def sanitize_history_url(url: str) -> str:
+    """Strip query, params, and fragments before persisting URLs to history."""
+    candidate = url.strip()
+    try:
+        parsed = urlparse(candidate)
+    except Exception:
+        return candidate
+
+    if parsed.scheme not in VALID_URL_SCHEMES or not parsed.netloc:
+        return candidate
+
+    return parsed._replace(params="", query="", fragment="").geturl()
+
+
+def sanitize_history_item_text(item_text: str) -> str:
+    """Normalize a saved history entry to its sanitized URL form."""
+    match = re.search(HISTORY_URL_PATTERN, item_text)
+    if not match:
+        return item_text
+
+    original_url = match.group(1)
+    sanitized_url = sanitize_history_url(original_url)
+    if sanitized_url == original_url:
+        return item_text
+
+    return item_text.replace(original_url, sanitized_url, 1)
+
 class WorkerSignals(QObject):
     """
     Defines the signals available from the worker thread.
@@ -434,9 +462,11 @@ class ImageScraperApp(QMainWindow):
         self.url_examples = QComboBox()
         self.url_examples.setFont(QFont(FONT_ARIAL, NORMAL_FONT_SIZE))
         self.url_examples.addItem("Select an example...")
-        self.url_examples.addItem("Artsy: https://www.artsy.net/artwork/ed-ruscha-history-kids-236")
-        self.url_examples.addItem("Artsy: https://www.artsy.net/artwork/shepard-fairey-shepard-fairey-screenprint-opt-art-green-gradient-street-contemporary-art-obey-giant")
-        self.url_examples.addItem("Artsy: https://www.artsy.net/artwork/frank-stella-homage-unique-signed-paper-collage-warmly-inscribed-to-european-curator")
+        for example_url in self.scraper_config.example_urls:
+            self.url_examples.addItem(example_url)
+        self.url_examples.setEnabled(bool(self.scraper_config.example_urls))
+        if not self.scraper_config.example_urls:
+            self.url_examples.setToolTip("No example URLs are configured.")
         self.url_examples.currentIndexChanged.connect(self.on_example_selected)
         url_layout.addWidget(self.url_examples)
 
@@ -647,9 +677,7 @@ class ImageScraperApp(QMainWindow):
 
     def on_example_selected(self, index: int) -> None:
         if index > 0:
-            example_text = self.url_examples.currentText()
-            url_part = example_text.split("Artsy: ", 1)[1] if "Artsy: " in example_text else example_text
-            self.url_input.setText(url_part.strip())
+            self.url_input.setText(self.url_examples.currentText().strip())
             self.validate_url_input_live() # Validate after setting example
 
     def browse_directory(self) -> None:
@@ -724,7 +752,11 @@ class ImageScraperApp(QMainWindow):
 
     def add_to_history(self, url: str, count: int) -> None:
         timestamp = datetime.now().strftime(HISTORY_TIMESTAMP_FORMAT)
-        item_text = HISTORY_ITEM_FORMAT.format(timestamp=timestamp, url=url, count=count)
+        item_text = HISTORY_ITEM_FORMAT.format(
+            timestamp=timestamp,
+            url=sanitize_history_url(url),
+            count=count,
+        )
         self.history_list.insertItem(0, item_text)
         self.save_history()
 
@@ -751,10 +783,15 @@ class ImageScraperApp(QMainWindow):
                 with open(history_file, 'r', encoding='utf-8') as f:
                     history_data = json.load(f)
                     if isinstance(history_data, list):
+                        history_changed = False
                         self.history_list.clear() # Clear before loading
                         for item_text in history_data:
                             if isinstance(item_text, str): # Basic validation
-                                self.history_list.addItem(item_text)
+                                sanitized_item_text = sanitize_history_item_text(item_text)
+                                history_changed = history_changed or sanitized_item_text != item_text
+                                self.history_list.addItem(sanitized_item_text)
+                        if history_changed:
+                            self.save_history()
                     else:
                         self.add_log_message("History file is not in the correct list format.")
         except json.JSONDecodeError:
