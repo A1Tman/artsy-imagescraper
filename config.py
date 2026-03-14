@@ -7,6 +7,11 @@ import os
 import json
 
 
+def domain_matches(domain: str, site_domain: str) -> bool:
+    """Return True when the domain is an exact match or subdomain."""
+    return domain == site_domain or domain.endswith('.' + site_domain)
+
+
 @dataclass
 class ScraperConfig:
     """Configuration for the image scraper."""
@@ -77,9 +82,7 @@ class ScraperConfig:
                         # Handle nested dicts like site_configs carefully
                         if isinstance(current, dict) and isinstance(value, dict):
                             current.update(value)
-                        elif type(current) == type(value) or (
-                            isinstance(current, (int, float)) and isinstance(value, (int, float))
-                        ):
+                        elif cls._is_compatible_config_value(current, value):
                             setattr(config, key, value)
                         else:
                             print(f"Warning: Skipping config key '{key}': "
@@ -115,6 +118,17 @@ class ScraperConfig:
         except Exception as e:
             print(f"Error saving configuration to {config_path}: {str(e)}")
             return False
+
+    @staticmethod
+    def _is_compatible_config_value(current: Any, value: Any) -> bool:
+        """Validate loaded values without treating bool as a numeric subtype."""
+        if isinstance(current, bool):
+            return isinstance(value, bool)
+        if isinstance(current, int):
+            return isinstance(value, int) and not isinstance(value, bool)
+        if isinstance(current, float):
+            return isinstance(value, (int, float)) and not isinstance(value, bool)
+        return type(current) == type(value)
     
     def get_site_config(self, domain: str) -> Dict[str, Any]:
         """Get site-specific configuration based on domain."""
@@ -122,7 +136,7 @@ class ScraperConfig:
         # e.g., if domain is "sub.artsy.net", "artsy.net" should match.
         best_match_key = None
         for site_key in self.site_configs.keys():
-            if domain == site_key or domain.endswith('.' + site_key):
+            if domain_matches(domain, site_key):
                 if best_match_key is None or len(site_key) > len(best_match_key):
                     best_match_key = site_key
         

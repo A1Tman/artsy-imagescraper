@@ -1,0 +1,7 @@
+appdirs
+beautifulsoup4
+lxml
+PyQt5
+requests
+selenium
+webdriver-manager
