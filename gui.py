@@ -5,19 +5,20 @@ import subprocess
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
                             QPushButton, QLineEdit, QLabel, QWidget, QFileDialog, 
                             QProgressBar, QMessageBox, QTextEdit, QGroupBox, 
-                            QTabWidget, QListWidget, QSplitter, QComboBox)
-from PyQt5.QtGui import QFont, QIcon, QTextCursor
-from PyQt5.QtCore import Qt, pyqtSignal, QObject, QTimer
+                            QTabWidget, QListWidget, QComboBox)
+from PyQt5.QtGui import QFont, QTextCursor
+from PyQt5.QtCore import Qt, pyqtSignal, QObject
 import json
 import re
 import copy
+from dataclasses import dataclass
 from datetime import datetime
 import appdirs
 from urllib.parse import urlparse
-from typing import Any, Dict, Optional
+from typing import Any
 
 # Import the unified scraper module
-from improved_scraper import scrape_images, OperationCancelledError
+from scraper import scrape_images, OperationCancelledError
 # Import config using absolute import instead of relative import
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 if _MODULE_DIR not in sys.path:
@@ -49,7 +50,6 @@ FONT_ARIAL = 'Arial'
 
 # Text Limits
 STATUS_TEXT_MAX_LENGTH = 100
-FILENAME_MAX_LENGTH = 100
 
 # Margins and Spacing (removed over-engineered single-use margin constants)
 
@@ -69,8 +69,9 @@ COLOR_DARK_RED = "#C0392B"
 
 # Application Info
 APP_NAME = "ImageScraper"
-WINDOW_TITLE = 'Universal Image Scraper'
-APP_DESCRIPTION = 'Download and organize artwork from various websites'
+WINDOW_TITLE = 'Image Scraper'
+APP_DESCRIPTION = 'Download and organize images from supported websites'
+REQUIREMENTS_LOCKFILE = os.path.join(_MODULE_DIR, "requirements.txt")
 
 # UI Text
 URL_INPUT_PLACEHOLDER = 'Enter URL (e.g., https://www.example.com/artwork/title)'
@@ -81,12 +82,12 @@ STATUS_READY = 'Ready'
 
 # Button Text
 BTN_START_SCRAPING = 'Start Scraping'
-BTN_CHECK_UPDATE_PACKAGES = 'Check/Update Packages'
+BTN_CHECK_ENVIRONMENT = 'Check Environment'
+BTN_SYNC_DEPENDENCIES = 'Sync Dependencies'
 BTN_CANCEL = 'Cancel'
 
 # Configuration Files
 SETTINGS_FILENAME = "settings.json"
-SCRAPER_CONFIG_FILENAME = "scraper_config.json"
 HISTORY_FILENAME = 'scraper_history.json'
 
 # History
@@ -103,6 +104,7 @@ PLATFORM_WINDOWS = 'win32'
 PLATFORM_MACOS = 'darwin'
 WINDOWS_INVALID_PATH_CHARS = ['<', '>', '|', '&', '^']
 FILE_OPEN_TIMEOUT_SECONDS = 5
+SUBPROCESS_POLL_TIMEOUT_SECONDS = 1
 
 # Security - System Directories
 WINDOWS_FORBIDDEN_DIRS = [
@@ -111,9 +113,138 @@ WINDOWS_FORBIDDEN_DIRS = [
     "C:\\Program Files (x86)"
 ]
 UNIX_FORBIDDEN_DIRS = ["/bin", "/sbin", "/boot", "/etc", "/sys", "/proc"]
+OPERATION_LABELS = {
+    "scraping": "Scraping",
+    "checking_environment": "Environment check",
+    "syncing_dependencies": "Dependency sync",
+}
 
-# Package Management
-REQUIRED_PACKAGES = ['selenium', 'beautifulsoup4', 'requests', 'webdriver-manager', 'PyQt5', 'appdirs']
+
+@dataclass(frozen=True)
+class EnvironmentStatus:
+    total_locked: int
+    matching_count: int
+    missing: list[tuple[str, str]]
+    mismatched: list[tuple[str, str, str]]
+
+    @property
+    def is_in_sync(self) -> bool:
+        return not self.missing and not self.mismatched
+
+
+def normalize_package_name(name: str) -> str:
+    """Normalize package names to pip's canonical comparison form."""
+    return re.sub(r"[-_.]+", "-", name.split("[", 1)[0]).lower()
+
+
+def parse_locked_requirements(requirements_path: str) -> dict[str, str]:
+    """Parse pinned packages from a pip-compile requirements.txt file."""
+    locked_requirements: dict[str, str] = {}
+    with open(requirements_path, "r", encoding="utf-8") as requirements_file:
+        for raw_line in requirements_file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "==" not in line:
+                continue
+
+            package_name, version = line.split("==", 1)
+            locked_requirements[normalize_package_name(package_name)] = version.strip()
+
+    return locked_requirements
+
+
+def get_installed_packages(python_executable: str = sys.executable) -> dict[str, str]:
+    """Return installed packages from the active Python environment."""
+    result = subprocess.run(
+        [python_executable, "-m", "pip", "list", "--format=json"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "pip list failed")
+
+    try:
+        package_list = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Could not parse pip list output") from exc
+
+    return {
+        normalize_package_name(package_data["name"]): package_data["version"]
+        for package_data in package_list
+        if "name" in package_data and "version" in package_data
+    }
+
+
+def build_environment_status(
+    locked_requirements: dict[str, str],
+    installed_packages: dict[str, str],
+) -> EnvironmentStatus:
+    """Compare the locked requirements against installed packages."""
+    missing: list[tuple[str, str]] = []
+    mismatched: list[tuple[str, str, str]] = []
+    matching_count = 0
+
+    for package_name, expected_version in sorted(locked_requirements.items()):
+        installed_version = installed_packages.get(package_name)
+        if installed_version is None:
+            missing.append((package_name, expected_version))
+        elif installed_version != expected_version:
+            mismatched.append((package_name, expected_version, installed_version))
+        else:
+            matching_count += 1
+
+    return EnvironmentStatus(
+        total_locked=len(locked_requirements),
+        matching_count=matching_count,
+        missing=missing,
+        mismatched=mismatched,
+    )
+
+
+def collect_environment_status(
+    requirements_path: str = REQUIREMENTS_LOCKFILE,
+    python_executable: str = sys.executable,
+) -> EnvironmentStatus:
+    """Inspect the current environment against the pinned requirements."""
+    locked_requirements = parse_locked_requirements(requirements_path)
+    installed_packages = get_installed_packages(python_executable)
+    return build_environment_status(locked_requirements, installed_packages)
+
+
+def format_environment_status_lines(status: EnvironmentStatus) -> list[str]:
+    """Format an environment status report for display in the GUI log."""
+    if status.is_in_sync:
+        return [
+            (
+                "Environment matches requirements.txt "
+                f"({status.matching_count}/{status.total_locked} locked packages matched)."
+            )
+        ]
+
+    lines = [
+        (
+            "Environment drift detected: "
+            f"{len(status.missing)} missing, {len(status.mismatched)} mismatched."
+        )
+    ]
+    lines.extend(
+        f"Missing: {package_name}=={expected_version}"
+        for package_name, expected_version in status.missing
+    )
+    lines.extend(
+        f"Mismatched: {package_name} expected {expected_version}, installed {installed_version}"
+        for package_name, expected_version, installed_version in status.mismatched
+    )
+    return lines
+
+def is_same_or_child_path(path: str, parent_path: str) -> bool:
+    """Return True when path is the same as parent_path or contained within it."""
+    normalized_path = os.path.normcase(os.path.abspath(path))
+    normalized_parent = os.path.normcase(os.path.abspath(parent_path))
+    try:
+        return os.path.commonpath([normalized_path, normalized_parent]) == normalized_parent
+    except ValueError:
+        return False
 
 class WorkerSignals(QObject):
     """
@@ -122,131 +253,15 @@ class WorkerSignals(QObject):
     finished = pyqtSignal(int)
     error = pyqtSignal(str)
     progress = pyqtSignal(object)
-
-class UpdatePackagesThread(threading.Thread):
-    """
-    Worker thread for updating packages.
-    Checks current versions and only updates outdated packages.
-    """
-    def __init__(self) -> None:
-        # self.settings = {} # This was in the original, but settings belong to the app
-        super().__init__()
-        self.signals: WorkerSignals = WorkerSignals()
-        self.cancel_requested: bool = False
-
-    def request_cancel(self) -> None:
-        """Set the cancel flag to request cancellation."""
-        self.cancel_requested = True
-
-    def run(self) -> None:
-        try:
-            self.signals.progress.emit("Starting package check...")
-            required_packages = REQUIRED_PACKAGES
-            updated_count = 0
-            already_latest_count = 0
-
-            self.signals.progress.emit("Checking for outdated packages...")
-            result = subprocess.run(
-                [sys.executable, '-m', 'pip', 'list', '--outdated', '--format=json'],
-                capture_output=True, text=True, check=False
-            )
-
-            if self.cancel_requested:
-                self.signals.progress.emit("Package update cancelled by user.")
-                self.signals.finished.emit(updated_count)
-                return
-
-            outdated_dict = {}
-            current_version_from_outdated_list_dict = {}
-            if result.returncode == 0 and result.stdout:
-                try:
-                    outdated_packages = json.loads(result.stdout)
-                    outdated_dict = {pkg["name"].lower(): pkg["latest_version"] for pkg in outdated_packages}
-                    current_version_from_outdated_list_dict = {pkg["name"].lower(): pkg["version"] for pkg in outdated_packages}
-                    required_outdated = [pkg for pkg in required_packages if pkg.lower() in outdated_dict]
-                    if required_outdated:
-                        self.signals.progress.emit(f"Found {len(required_outdated)} outdated required packages out of {len(outdated_dict)} total outdated packages.")
-                    else:
-                        self.signals.progress.emit(f"None of the required packages are outdated (although {len(outdated_dict)} other packages in your environment could be updated).")
-                except json.JSONDecodeError:
-                    self.signals.progress.emit("Warning: Could not parse outdated packages list. Will check each package individually.")
-            else:
-                 self.signals.progress.emit(f"Could not get outdated packages list (pip list --outdated). Will check each individually. Error: {result.stderr}")
+    cancelled = pyqtSignal(str)
 
 
-            for package in required_packages:
-                if self.cancel_requested: break
-                package_lower = package.lower()
-                should_update = False
-                current_version_str = "N/A"
-
-                if package_lower in outdated_dict:
-                    current_version_str = current_version_from_outdated_list_dict.get(package_lower, "N/A")
-                    latest_version = outdated_dict[package_lower]
-                    self.signals.progress.emit(f"Updating {package} from {current_version_str} to {latest_version}...")
-                    should_update = True
-                else:
-                    current_version = self._get_package_version(package)
-                    if current_version:
-                        self.signals.progress.emit(f"{package} is already installed ({current_version}). Assuming latest or checking individually if list failed.")
-                        # If outdated_dict is empty (e.g. pip list --outdated failed), we might still want to try an update
-                        if not outdated_dict: # If the main list failed, try to update anyway
-                             self.signals.progress.emit(f"Attempting to update {package} as outdated check was inconclusive...")
-                             should_update = True
-                        else: # outdated_dict is populated, and this package is not in it
-                             already_latest_count +=1 # Count as already latest based on pip list --outdated
-                    else: # Not installed
-                        self.signals.progress.emit(f"Installing {package}...")
-                        should_update = True # Treat as an update/install
-
-                if should_update:
-                    pip_command = ['install', '--upgrade', package] if package_lower in outdated_dict or (not outdated_dict and self._get_package_version(package)) else ['install', package]
-                    update_result = subprocess.run(
-                        [sys.executable, '-m', 'pip'] + pip_command,
-                        capture_output=True, text=True, check=False
-                    )
-                    if self.cancel_requested: break
-                    if update_result.returncode == 0:
-                        new_version = self._get_package_version(package)
-                        self.signals.progress.emit(f"Successfully {'updated' if package_lower in outdated_dict else 'installed'} {package} to {new_version or 'latest'}")
-                        updated_count += 1
-                    else:
-                        self.signals.progress.emit(f"Error {'updating' if package_lower in outdated_dict else 'installing'} {package}: {update_result.stderr}")
-            
-            if self.cancel_requested:
-                self.signals.progress.emit("Package update cancelled by user.")
-                self.signals.finished.emit(updated_count)
-                return
-
-            self.signals.progress.emit("\nFinal package versions:")
-            for package in required_packages:
-                if self.cancel_requested: break
-                version = self._get_package_version(package)
-                self.signals.progress.emit(f"{package}: {version or 'Not Installed'}")
-
-            summary_msg = f"\nSummary: {updated_count} packages processed for update/install."
-            if already_latest_count > 0 and outdated_dict : # Only count if pip list --outdated worked
-                 summary_msg += f" {already_latest_count} packages were already at the latest version."
-            self.signals.progress.emit(summary_msg)
-            self.signals.finished.emit(updated_count)
-
-        except Exception as e:
-            self.signals.error.emit(f"Update thread error: {str(e)}")
-
-    def _get_package_version(self, package_name: str) -> Optional[str]:
-        try:
-            result = subprocess.run(
-                [sys.executable, '-m', 'pip', 'show', package_name],
-                capture_output=True, text=True, check=False
-            )
-            if result.returncode == 0:
-                for line in result.stdout.splitlines():
-                    if line.startswith("Version:"):
-                        return line.split(":", 1)[1].strip()
-            return None
-        except (subprocess.SubprocessError, OSError):
-            # Handle subprocess and OS errors gracefully
-            return None
+class EnvironmentSignals(QObject):
+    """Signals used by environment check and sync operations."""
+    finished = pyqtSignal(object)
+    error = pyqtSignal(str)
+    progress = pyqtSignal(str)
+    cancelled = pyqtSignal(str)
 
 class ScraperThread(threading.Thread):
     def __init__(self, url: str, config: ScraperConfig) -> None:
@@ -279,14 +294,99 @@ class ScraperThread(threading.Thread):
             )
             if not self.cancel_requested:
                 self.signals.finished.emit(result)
-            else: # If cancelled, finished signal might have been emitted by handle_scraper_progress or here
-                self.signals.progress.emit({'type': PROG_MESSAGE, 'value': "Scraping operation was cancelled."})
-                self.signals.finished.emit(0) # Indicate 0 images if cancelled
+            else:
+                self.signals.cancelled.emit("Scraping cancelled.")
         except OperationCancelledError:
-            self.signals.progress.emit({'type': PROG_MESSAGE, 'value': "Scraping cancelled."})
-            self.signals.finished.emit(0)
+            self.signals.cancelled.emit("Scraping cancelled.")
         except Exception as e:
             self.signals.error.emit(str(e))
+
+
+class EnvironmentCheckThread(threading.Thread):
+    """Check whether the current environment matches requirements.txt."""
+
+    def __init__(
+        self,
+        requirements_path: str = REQUIREMENTS_LOCKFILE,
+        python_executable: str = sys.executable,
+    ) -> None:
+        super().__init__()
+        self.requirements_path = requirements_path
+        self.python_executable = python_executable
+        self.signals = EnvironmentSignals()
+
+    def run(self) -> None:
+        try:
+            self.signals.progress.emit("Checking installed packages against requirements.txt...")
+            status = collect_environment_status(self.requirements_path, self.python_executable)
+            self.signals.finished.emit(status)
+        except Exception as exc:
+            self.signals.error.emit(str(exc))
+
+
+class DependencySyncThread(threading.Thread):
+    """Install the exact dependency set pinned in requirements.txt."""
+
+    def __init__(
+        self,
+        requirements_path: str = REQUIREMENTS_LOCKFILE,
+        python_executable: str = sys.executable,
+    ) -> None:
+        super().__init__()
+        self.requirements_path = requirements_path
+        self.python_executable = python_executable
+        self.signals = EnvironmentSignals()
+        self.cancel_requested = False
+        self.process: subprocess.Popen[str] | None = None
+
+    def request_cancel(self) -> None:
+        self.cancel_requested = True
+        if self.process and self.process.poll() is None:
+            self.process.terminate()
+
+    def run(self) -> None:
+        command = [self.python_executable, "-m", "pip", "install", "-r", self.requirements_path]
+        try:
+            self.signals.progress.emit("Syncing installed packages to requirements.txt...")
+            self.signals.progress.emit(f"Running: {' '.join(command)}")
+            self.process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
+
+            if self.process.stdout is not None:
+                for line in self.process.stdout:
+                    if self.cancel_requested:
+                        break
+                    message = line.strip()
+                    if message:
+                        self.signals.progress.emit(message)
+
+            return_code = self.process.wait(timeout=SUBPROCESS_POLL_TIMEOUT_SECONDS)
+
+            if self.cancel_requested:
+                self.signals.cancelled.emit("Dependency sync cancelled.")
+                return
+
+            if return_code != 0:
+                self.signals.error.emit(
+                    f"Dependency sync failed with exit code {return_code}."
+                )
+                return
+
+            status = collect_environment_status(self.requirements_path, self.python_executable)
+            self.signals.finished.emit(status)
+        except subprocess.TimeoutExpired:
+            if self.process and self.process.poll() is None:
+                self.process.kill()
+            self.signals.cancelled.emit("Dependency sync cancelled.")
+        except Exception as exc:
+            self.signals.error.emit(str(exc))
 
 class ImageScraperApp(QMainWindow):
     def __init__(self) -> None:
@@ -295,6 +395,8 @@ class ImageScraperApp(QMainWindow):
         self.scraper_config = ScraperConfig.load() # Load default scraper config
         # One could also load from a specific path, e.g., os.join(appdirs.user_config_dir("ImageScraper"), "scraper_config.json")
         # And save it if the user modifies settings via a potential future UI for config.
+        self.environment_check_thread = None
+        self.dependency_sync_thread = None
         self.initUI()      
 
     def initUI(self) -> None:
@@ -435,12 +537,18 @@ class ImageScraperApp(QMainWindow):
         self.start_button.clicked.connect(self.start_scraping)
         buttons_layout.addWidget(self.start_button)
 
-        self.update_button = QPushButton(BTN_CHECK_UPDATE_PACKAGES)
-        self.update_button.setFont(QFont(FONT_ARIAL, 10))
-        self.update_button.setStyleSheet("QPushButton {padding: 10px; background-color: #3498DB; color: white; border: none; border-radius: 4px;} QPushButton:hover {background-color: #2980B9;} QPushButton:disabled {background-color: #95A5A6;}")
-        self.update_button.clicked.connect(self.update_packages)
-        buttons_layout.addWidget(self.update_button)
-        
+        self.check_environment_button = QPushButton(BTN_CHECK_ENVIRONMENT)
+        self.check_environment_button.setFont(QFont(FONT_ARIAL, 10))
+        self.check_environment_button.setStyleSheet("QPushButton {padding: 10px; background-color: #3498DB; color: white; border: none; border-radius: 4px;} QPushButton:hover {background-color: #2980B9;} QPushButton:disabled {background-color: #95A5A6;}")
+        self.check_environment_button.clicked.connect(self.check_environment)
+        buttons_layout.addWidget(self.check_environment_button)
+
+        self.sync_dependencies_button = QPushButton(BTN_SYNC_DEPENDENCIES)
+        self.sync_dependencies_button.setFont(QFont(FONT_ARIAL, 10))
+        self.sync_dependencies_button.setStyleSheet("QPushButton {padding: 10px; background-color: #7F8C8D; color: white; border: none; border-radius: 4px;} QPushButton:hover {background-color: #5D6D7E;} QPushButton:disabled {background-color: #95A5A6;}")
+        self.sync_dependencies_button.clicked.connect(self.sync_dependencies)
+        buttons_layout.addWidget(self.sync_dependencies_button)
+
         self.cancel_button = QPushButton(BTN_CANCEL)
         self.cancel_button.setFont(QFont(FONT_ARIAL, 10))
         self.cancel_button.setStyleSheet("QPushButton {padding: 10px; background-color: #E74C3C; color: white; border: none; border-radius: 4px;} QPushButton:hover {background-color: #C0392B;} QPushButton:disabled {background-color: #95A5A6;}")
@@ -478,7 +586,7 @@ class ImageScraperApp(QMainWindow):
             self.save_dir_input.setText(last_save_dir)
         else:
             # Fallback to a 'Scraped_Images' directory in the app's user data directory
-            default_dir_base = appdirs.user_data_dir("ImageScraper", "ImageScraperApp")
+            default_dir_base = appdirs.user_data_dir(APP_NAME, "ImageScraperApp")
             # Ensure the base directory itself exists before creating a subdirectory
             os.makedirs(default_dir_base, exist_ok=True) 
             default_dir = os.path.join(default_dir_base, 'Scraped_Images')
@@ -493,20 +601,19 @@ class ImageScraperApp(QMainWindow):
         self.cancel_button.setEnabled(False)
         self.active_operation = None
         self.scraper_thread = None # Initialize scraper_thread attribute
-        self.update_thread = None  # Initialize update_thread attribute
 
     def validate_url_input_live(self) -> None:
         """Validates URL input live as user types."""
         url = self.url_input.text().strip()
         is_valid = self.is_valid_url(url)
         self.url_warning_label.setVisible(not is_valid and bool(url)) # Show warning only if text exists and is invalid
-        self.start_button.setEnabled(is_valid)
+        self.start_button.setEnabled(is_valid and self.active_operation is None)
 
     def save_settings(self) -> None:
         try:
-            config_dir = appdirs.user_config_dir("ImageScraper", "ImageScraperApp")
+            config_dir = appdirs.user_config_dir(APP_NAME, "ImageScraperApp")
             os.makedirs(config_dir, exist_ok=True)
-            config_path = os.path.join(config_dir, "settings.json")
+            config_path = os.path.join(config_dir, SETTINGS_FILENAME)
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(self.settings, f, indent=4) # Added indent for readability
         except Exception as e:
@@ -515,8 +622,8 @@ class ImageScraperApp(QMainWindow):
     def load_settings(self) -> None:
         self.settings = {} # Initialize to empty dict first
         try:
-            config_dir = appdirs.user_config_dir("ImageScraper", "ImageScraperApp")
-            config_path = os.path.join(config_dir, "settings.json")
+            config_dir = appdirs.user_config_dir(APP_NAME, "ImageScraperApp")
+            config_path = os.path.join(config_dir, SETTINGS_FILENAME)
             if os.path.exists(config_path):
                 with open(config_path, "r", encoding="utf-8") as f:
                     loaded_settings = json.load(f)
@@ -534,7 +641,7 @@ class ImageScraperApp(QMainWindow):
     def is_valid_url(self, url: str) -> bool:
         try:
             parsed = urlparse(url)
-            return parsed.scheme in ("http", "https") and bool(parsed.netloc) and '.' in parsed.netloc
+            return parsed.scheme in VALID_URL_SCHEMES and bool(parsed.netloc) and '.' in parsed.netloc
         except Exception:
             return False
 
@@ -610,22 +717,21 @@ class ImageScraperApp(QMainWindow):
             QMessageBox.warning(self, "Error Opening Folder", f"Could not open folder: {e}")
         
     def add_log_message(self, message: str, timestamp: bool = True) -> None:
-        now = datetime.now().strftime("%H:%M:%S") if timestamp else ""
+        now = datetime.now().strftime(LOG_TIME_FORMAT) if timestamp else ""
         prefix = f"[{now}] " if timestamp else ""
         self.log_output.append(f"{prefix}{message}")
         self.log_output.moveCursor(QTextCursor.End)
 
     def add_to_history(self, url: str, count: int) -> None:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        item_text = f"{timestamp} - {url} ({count} images)"
+        timestamp = datetime.now().strftime(HISTORY_TIMESTAMP_FORMAT)
+        item_text = HISTORY_ITEM_FORMAT.format(timestamp=timestamp, url=url, count=count)
         self.history_list.insertItem(0, item_text)
         self.save_history()
 
     def _get_history_file_path(self) -> str:
-        app_name = "ImageScraper"
-        data_dir = appdirs.user_data_dir(app_name)
+        data_dir = appdirs.user_data_dir(APP_NAME)
         os.makedirs(data_dir, exist_ok=True)
-        return os.path.join(data_dir, 'scraper_history.json')
+        return os.path.join(data_dir, HISTORY_FILENAME)
 
     def save_history(self) -> None:
         history_file = self._get_history_file_path()
@@ -670,7 +776,7 @@ class ImageScraperApp(QMainWindow):
         selected_items = self.history_list.selectedItems()
         if selected_items:
             item_text = selected_items[0].text()
-            match = re.search(r' - (https?://[^\s]+) \(.*', item_text) # Regex to find URL
+            match = re.search(HISTORY_URL_PATTERN, item_text)
             if match:
                 url = match.group(1)
                 self.url_input.setText(url)
@@ -679,27 +785,10 @@ class ImageScraperApp(QMainWindow):
                 self.validate_url_input_live()
             else:
                 self.add_log_message("Could not parse URL from selected history item.")
-    
-    def update_packages(self) -> None:
-        """Check for and update required Python packages in background thread."""
-        self.progress_bar.setRange(0,0) # Indeterminate for package updates
-        self.progress_bar.setVisible(True)
-        self.status_label.setText('Checking/Updating packages...')
-        self.update_button.setEnabled(False)
-        self.start_button.setEnabled(False)
-        self.cancel_button.setEnabled(True)
-        self.log_output.clear()
-        self.add_log_message("Starting package update process...")
-        self.active_operation = "updating"
-        self.tab_widget.setCurrentIndex(0)
 
-        self.update_thread = UpdatePackagesThread()
-        self.update_thread.signals.progress.connect(self.update_ui_progress)
-        self.update_thread.signals.finished.connect(self.update_finished)
-        self.update_thread.signals.error.connect(self.operation_error)
-        self.update_thread.daemon = True
-        self.update_thread.start()
-        
+    def get_active_operation_label(self) -> str:
+        return OPERATION_LABELS.get(self.active_operation, "Operation")
+    
     def update_ui_progress(self, progress_update: Any) -> None:
         if isinstance(progress_update, dict):
             prog_type = progress_update.get(PROG_TYPE)
@@ -708,34 +797,145 @@ class ImageScraperApp(QMainWindow):
             if prog_type == PROG_PERCENTAGE:
                 # Progress bar range is already set to 0-100 in start_scraping
                 self.progress_bar.setValue(int(prog_value))
-                op_label = "Scraping" if self.active_operation == "scraping" else "Updating"
-                self.status_label.setText(f"{op_label}: {int(prog_value)}%")
+                self.status_label.setText(f"Scraping: {int(prog_value)}%")
             elif prog_type == PROG_MESSAGE:
                 self.status_label.setText(str(prog_value)[:STATUS_TEXT_MAX_LENGTH])
                 self.add_log_message(str(prog_value))
             else:
                 self.add_log_message(f"Unknown progress data: {str(progress_update)}")
         elif isinstance(progress_update, str):
-            # Handle string progress updates (used by package update thread)
-            self.add_log_message(progress_update)
             self.status_label.setText(progress_update[:STATUS_TEXT_MAX_LENGTH])
+            self.add_log_message(progress_update)
         else:
             self.add_log_message(f"Unknown progress type: {str(progress_update)}")
-        
-    def operation_common_finish_ui(self) -> None:
-        self.validate_url_input_live()  # Re-enables start button only if URL is valid
-        self.update_button.setEnabled(True)
+
+    def set_action_buttons_enabled(self, busy: bool, allow_cancel: bool = False) -> None:
+        self.start_button.setEnabled(False if busy else self.is_valid_url(self.url_input.text().strip()))
+        self.check_environment_button.setEnabled(not busy)
+        self.sync_dependencies_button.setEnabled(not busy)
         self.cancel_button.setEnabled(False)
+        if busy and allow_cancel:
+            self.cancel_button.setEnabled(True)
+
+    def operation_common_finish_ui(self) -> None:
+        self.active_operation = None
+        self.validate_url_input_live()  # Re-enables start button only if URL is valid
+        self.check_environment_button.setEnabled(True)
+        self.sync_dependencies_button.setEnabled(True)
         self.progress_bar.setVisible(False)
         self.progress_bar.setValue(0) # Reset progress bar
-        self.active_operation = None
+        self.cancel_button.setEnabled(False)
 
-    def update_finished(self, count: int) -> None:
-        final_message = f'Package check complete. {count} packages processed.'
+    def check_environment(self) -> None:
+        if not os.path.exists(REQUIREMENTS_LOCKFILE):
+            QMessageBox.critical(self, "Missing Lockfile", f"Could not find:\n{REQUIREMENTS_LOCKFILE}")
+            return
+
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setVisible(True)
+        self.status_label.setText("Checking environment...")
+        self.set_action_buttons_enabled(busy=True)
+        self.active_operation = "checking_environment"
+        self.tab_widget.setCurrentIndex(0)
+        self.add_log_message("Checking environment against requirements.txt...")
+
+        self.environment_check_thread = EnvironmentCheckThread(REQUIREMENTS_LOCKFILE)
+        self.environment_check_thread.signals.progress.connect(self.update_ui_progress)
+        self.environment_check_thread.signals.finished.connect(self.environment_check_finished)
+        self.environment_check_thread.signals.error.connect(self.operation_error)
+        self.environment_check_thread.daemon = True
+        self.environment_check_thread.start()
+
+    def environment_check_finished(self, status: EnvironmentStatus) -> None:
+        for line in format_environment_status_lines(status):
+            self.add_log_message(line)
+
+        if status.is_in_sync:
+            final_message = (
+                f"Environment matches requirements.txt "
+                f"({status.matching_count}/{status.total_locked} locked packages)."
+            )
+            self.status_label.setText(final_message)
+            self.operation_common_finish_ui()
+            QMessageBox.information(self, "Environment Check", final_message)
+            return
+
+        final_message = (
+            "Environment drift detected. "
+            f"{len(status.missing)} missing, {len(status.mismatched)} mismatched."
+        )
         self.status_label.setText(final_message)
-        self.add_log_message(f"\nPackage update process finished! {count} packages were processed for update/install.", timestamp=False)
         self.operation_common_finish_ui()
-        QMessageBox.information(self, "Update Complete", final_message)
+        QMessageBox.warning(
+            self,
+            "Environment Check",
+            f"{final_message}\nSee the Logs tab for package details.",
+        )
+
+    def sync_dependencies(self) -> None:
+        if not os.path.exists(REQUIREMENTS_LOCKFILE):
+            QMessageBox.critical(self, "Missing Lockfile", f"Could not find:\n{REQUIREMENTS_LOCKFILE}")
+            return
+
+        should_continue = QMessageBox.question(
+            self,
+            "Sync Dependencies",
+            (
+                "This will run `python -m pip install -r requirements.txt` "
+                "for the current Python environment.\n\n"
+                "Restart the app after completion to use any updated packages.\n\n"
+                "Continue?"
+            ),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if should_continue != QMessageBox.Yes:
+            return
+
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setVisible(True)
+        self.status_label.setText("Syncing dependencies...")
+        self.set_action_buttons_enabled(busy=True, allow_cancel=True)
+        self.active_operation = "syncing_dependencies"
+        self.tab_widget.setCurrentIndex(0)
+        self.log_output.clear()
+        self.add_log_message("Starting dependency sync from requirements.txt...")
+        self.add_log_message("Restart the app after the sync finishes.")
+
+        self.dependency_sync_thread = DependencySyncThread(REQUIREMENTS_LOCKFILE)
+        self.dependency_sync_thread.signals.progress.connect(self.update_ui_progress)
+        self.dependency_sync_thread.signals.finished.connect(self.dependency_sync_finished)
+        self.dependency_sync_thread.signals.cancelled.connect(self.dependency_sync_cancelled)
+        self.dependency_sync_thread.signals.error.connect(self.operation_error)
+        self.dependency_sync_thread.daemon = True
+        self.dependency_sync_thread.start()
+
+    def dependency_sync_finished(self, status: EnvironmentStatus) -> None:
+        for line in format_environment_status_lines(status):
+            self.add_log_message(line)
+
+        if status.is_in_sync:
+            final_message = "Dependency sync complete. Restart the app to use any updated packages."
+            self.status_label.setText("Dependency sync complete.")
+            self.operation_common_finish_ui()
+            QMessageBox.information(self, "Dependency Sync", final_message)
+            return
+
+        final_message = (
+            "Dependency sync completed, but the environment still differs from requirements.txt."
+        )
+        self.status_label.setText(final_message)
+        self.operation_common_finish_ui()
+        QMessageBox.warning(
+            self,
+            "Dependency Sync",
+            f"{final_message}\nSee the Logs tab for package details.",
+        )
+
+    def dependency_sync_cancelled(self, message: str) -> None:
+        self.status_label.setText(message)
+        self.add_log_message(message)
+        self.operation_common_finish_ui()
 
     def start_scraping(self) -> None:
         """
@@ -753,10 +953,6 @@ class ImageScraperApp(QMainWindow):
             # Normalize and resolve the path to prevent traversal attacks
             save_dir = os.path.abspath(os.path.normpath(save_dir))
 
-            # Security: Ensure the resolved path doesn't escape to system directories
-            # Get user's home directory as a safe base reference
-            user_home = os.path.expanduser("~")
-
             # Check if path tries to access sensitive system directories
             forbidden_prefixes = []
             if sys.platform == PLATFORM_WINDOWS:
@@ -773,7 +969,7 @@ class ImageScraperApp(QMainWindow):
 
             # Check if path is trying to access forbidden directories
             for forbidden in forbidden_prefixes:
-                if save_dir.lower().startswith(forbidden.lower()):
+                if is_same_or_child_path(save_dir, forbidden):
                     QMessageBox.warning(self, "Security Error",
                                       "Cannot save to system directories.\nPlease choose a location in your user folders.")
                     return
@@ -797,9 +993,7 @@ class ImageScraperApp(QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(True)
         self.status_label.setText('Starting scraping...')
-        self.start_button.setEnabled(False)
-        self.update_button.setEnabled(False)
-        self.cancel_button.setEnabled(True)
+        self.set_action_buttons_enabled(busy=True, allow_cancel=True)
         self.log_output.clear() # Clear log for new scrape
         self.add_log_message(f"Starting scraper for URL: {url}")
         self.add_log_message(f"Saving images to: {save_dir}")
@@ -812,6 +1006,7 @@ class ImageScraperApp(QMainWindow):
         self.scraper_thread = ScraperThread(url, thread_config)
         self.scraper_thread.signals.progress.connect(self.update_ui_progress)
         self.scraper_thread.signals.finished.connect(self.scraping_finished)
+        self.scraper_thread.signals.cancelled.connect(self.scraping_cancelled)
         self.scraper_thread.signals.error.connect(self.operation_error)
         self.scraper_thread.daemon = True
         self.scraper_thread.start()
@@ -825,22 +1020,31 @@ class ImageScraperApp(QMainWindow):
         self.operation_common_finish_ui()
         QMessageBox.information(self, "Scraping Complete", f"{final_message}\nSaved to: {self.save_dir_input.text()}")
 
+    def scraping_cancelled(self, message: str) -> None:
+        self.status_label.setText(message)
+        self.add_log_message(f"\n{message}", timestamp=False)
+        self.operation_common_finish_ui()
+
     def operation_error(self, error_message: str) -> None:
-        op_name = self.active_operation if self.active_operation else "Operation"
+        op_name = self.get_active_operation_label()
         self.status_label.setText(f'Error during {op_name}!')
         self.add_log_message(f"\nERROR during {op_name}: {error_message}", timestamp=False)
         self.operation_common_finish_ui()
-        QMessageBox.critical(self, f"{op_name.capitalize()} Error", f"An error occurred:\n\n{error_message}")
+        QMessageBox.critical(self, f"{op_name} Error", f"An error occurred:\n\n{error_message}")
 
     def cancel_operation(self) -> None:
         if self.active_operation == "scraping" and self.scraper_thread and self.scraper_thread.is_alive():
             self.scraper_thread.request_cancel()
             self.add_log_message("Cancellation requested for scraping...")
             self.status_label.setText("Cancelling scraping...")
-        elif self.active_operation == "updating" and self.update_thread and self.update_thread.is_alive():
-            self.update_thread.request_cancel()
-            self.add_log_message("Cancellation requested for package update...")
-            self.status_label.setText("Cancelling package update...")
+        elif (
+            self.active_operation == "syncing_dependencies"
+            and self.dependency_sync_thread
+            and self.dependency_sync_thread.is_alive()
+        ):
+            self.dependency_sync_thread.request_cancel()
+            self.add_log_message("Cancellation requested for dependency sync...")
+            self.status_label.setText("Cancelling dependency sync...")
         else:
             self.add_log_message("No active cancellable operation running.")
             return # No need to disable cancel button if nothing to cancel

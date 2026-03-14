@@ -1,6 +1,6 @@
-# Artsy Image Scraper
+# Image Scraper
 
-A tool for downloading high-quality artwork images from Artsy.net and other art websites. Automatically organizes downloads by artist and artwork name.
+A desktop and command-line tool for downloading high-quality images from Artsy.net and other websites. Downloads are organized by artist/site and artwork/page title.
 
 ## Features
 
@@ -32,40 +32,55 @@ pip install -r requirements.txt
 
 Run the GUI:
 ```bash
-python scraper_gui.py
+python gui.py
 ```
 
 ## Usage
 
 ### GUI Mode
-1. Run `python scraper_gui.py`
+1. Run `python gui.py`
 2. Enter an Artsy URL or select one from the examples dropdown
 3. Choose where to save the images
-4. Click "Start Scraping"
-5. Check the Logs tab to monitor progress
+4. Use `Check Environment` to compare installed packages against `requirements.txt` when needed
+5. Use `Sync Dependencies` to install the exact pinned dependency set from the lock file
+6. Click `Start Scraping`
+7. Check the Logs tab to monitor progress
 
 Images are saved to: `{save_location}/{artist_name}/{artwork_title}.jpg`
 
 ### Command-Line Mode
-Run `python improved_scraper.py` for an interactive command-line interface with verbose output.
+Run `python scraper.py` for an interactive command-line interface with verbose output.
 
 ### Example URLs
-Try these Artsy artwork pages:
+Try these pages:
 - https://www.artsy.net/artwork/ellen-von-unwerth-isabelle
 - https://www.artsy.net/artwork/ed-ruscha-history-kids-236
 - https://www.artsy.net/artwork/shepard-fairey-shepard-fairey-screenprint-opt-art-green-gradient-street-contemporary-art-obey-giant
+- https://arstechnica.com/tech-policy/2026/03/trumps-doj-is-not-falling-for-sam-bankman-frieds-maga-makeover-on-x/
 
 ## Project Structure
 
 ```
 artsy-imagescraper/
-├── improved_scraper.py    # Core scraping engine
+├── scraper.py             # Core scraping engine
+├── gui.py                 # PyQt5 desktop app
 ├── config.py              # Configuration settings
 ├── resources.py           # Resource management (WebDriver, HTTP sessions)
-├── scraper_gui.py         # PyQt5 GUI
-├── requirements.txt       # Dependencies
+├── requirements.in        # Direct runtime dependencies
+├── requirements.txt       # Pinned runtime lock file
 └── README.md              # This file
 ```
+
+## Dependency Management
+
+Dependencies are managed with `pip-tools`.
+
+- Install the pinned runtime environment: `python -m pip install -r requirements.txt`
+- Refresh the lock file after changing direct dependencies: `powershell -ExecutionPolicy Bypass -File scripts/update-deps.ps1`
+- Reinstall the current pinned environment: `powershell -ExecutionPolicy Bypass -File scripts/sync-deps.ps1`
+- The GUI exposes the same workflow with `Check Environment` and `Sync Dependencies` buttons
+
+`requirements.in` is the hand-edited list of direct dependencies. `requirements.txt` is generated from it and should not be edited manually.
 
 ## Configuration
 

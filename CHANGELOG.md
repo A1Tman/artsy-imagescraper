@@ -1,9 +1,22 @@
 # Changelog
 
-All notable changes to the Artsy Image Scraper project will be documented in this file.
+All notable changes to the Image Scraper project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [3.0.0] - 2026-03-14
+
+### Changed
+
+- Renamed the main entrypoints to `scraper.py` and `gui.py`.
+- Removed the in-app package updater in favor of repo-managed dependency locks.
+- Added `requirements.in` as the direct dependency source for the project.
+- Pinned runtime dependencies in `requirements.txt` using `pip-tools`.
+- Added maintenance scripts for syncing and updating dependencies.
+- Added GUI buttons for checking environment drift and syncing the installed environment back to the pinned lock file.
 
 ## [2.4] - 2026-02-21
 
@@ -11,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Wrong argument passed to `extract_images_from_page`** — `verbose` was landing in the `driver` parameter, so verbose mode produced no output during the image-extraction phase.
 - **Cancel triggered error dialog instead of clean cancel** — `OperationCancelledError` was being caught and wrapped by the generic `except Exception` block in `scrape_images`, so the cancellation reached the GUI as an error message. Now re-raised without wrapping.
-- **`OperationCancelledError` moved to `improved_scraper.py`** — was defined in `scraper_gui.py`, making it impossible for `improved_scraper.py` to catch it specifically. Now imported in `scraper_gui.py`.
+- **`OperationCancelledError` moved into the scraper module** — this made it possible for the scraper implementation to catch it directly instead of only the GUI layer.
 - **Domain matching false-positive in `get_site_config`** — `domain.endswith(site_key)` matched `notartsy.net` against `artsy.net`. Fixed to require exact match or a dot boundary.
 - **`parsed_url` unbound in outer except in `extract_generic_info`** — referenced in the except block but defined inside the try. Moved before the try.
 - **Off-by-one: h4 headings never searched** — `range(MIN_HEADING_LEVEL, MAX_HEADING_LEVEL)` excluded h4. Changed to `MAX_HEADING_LEVEL + 1`.
