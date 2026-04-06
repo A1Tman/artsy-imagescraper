@@ -42,7 +42,7 @@ pysocks==1.7.1
     # via urllib3
 python-dotenv==1.2.2
     # via webdriver-manager
-requests==2.33.0
+requests==2.33.1
     # via
     #   -r requirements.in
     #   webdriver-manager
