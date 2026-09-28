@@ -29,18 +29,22 @@ class ScraperConfig:
     page_load_timeout: int = 30  # Maximum time to wait for page to load (30 seconds)
     element_wait_timeout: int = 10  # Maximum time to wait for elements to appear (10 seconds)
     download_timeout: int = 10  # Maximum time to wait for image downloads (10 seconds)
+    download_deadline: int = 60  # Total seconds per candidate, including redirects
     render_wait_time: int = 3  # Time to wait for JavaScript to render dynamic content (3 seconds)
 
     # Image settings
     min_image_size: int = 10000  # Minimum image size in bytes (~10KB) to filter out thumbnails and icons
     max_download_size: int = 50 * 1024 * 1024  # Maximum image size in bytes (~50MB) to avoid unbounded downloads
+    max_total_download_size: int = 300 * 1024 * 1024
+    max_images: int = 30
+    max_image_pixels: int = 80_000_000
+    image_selection: str = "primary"  # primary or content (additional images in the main content)
     preferred_extensions: List[str] = field(default_factory=lambda: [".jpg", ".jpeg", ".png", ".webp", ".bmp"]) # Added .bmp
 
     # Filtering
     unwanted_image_terms: List[str] = field(default_factory=lambda: [
         'logo', 'icon', 'avatar', 'banner', 'button', 'thumbnail', 
-        'favicon', 'ads', 'tracking', 'universal-footer', 'larger', 
-        'small', 'square', 'source'
+        'favicon', 'ads', 'tracking', 'universal-footer'
     ])
     
     # Site-specific configurations
@@ -60,7 +64,7 @@ class ScraperConfig:
                 r'resize_to=fit&src=([^&]+)',  # Extract src parameter from Artsy CDN URLs
                 r'src=([^&]+)'  # Backup pattern
             ],
-            "unwanted_image_terms_override": ['universal-footer', 'larger', 'small', 'square', 'source', 'logo', 'icon', 'favicon', 'thumbnail']
+            "unwanted_image_terms_override": ['universal-footer', 'logo', 'icon', 'favicon', 'thumbnail']
         }
         # Add other site configs here, e.g.
         # "generic_site.com": { ... }
@@ -78,12 +82,12 @@ class ScraperConfig:
                 
                 # Update config fields from loaded data
                 for key, value in config_data.items():
-                    if hasattr(config, key):
+                    if key in cls.__dataclass_fields__:
                         current = getattr(config, key)
                         # Handle nested dicts like site_configs carefully
                         if isinstance(current, dict) and isinstance(value, dict):
                             current.update(value)
-                        elif cls._is_compatible_config_value(current, value):
+                        elif cls._is_compatible_config_value(current, value) and cls._is_valid_field(key, value):
                             setattr(config, key, value)
                         else:
                             print(f"Warning: Skipping config key '{key}': "
@@ -119,6 +123,19 @@ class ScraperConfig:
         except Exception as e:
             print(f"Error saving configuration to {config_path}: {str(e)}")
             return False
+
+    @staticmethod
+    def _is_valid_field(key, value):
+        if key in {"page_load_timeout", "element_wait_timeout", "download_timeout", "download_deadline",
+                   "max_download_size", "max_total_download_size", "max_images", "max_image_pixels"}:
+            return value > 0
+        if key in {"render_wait_time", "min_image_size"}:
+            return value >= 0
+        if key == "image_selection":
+            return value in {"primary", "content"}
+        if key in {"unwanted_image_terms", "preferred_extensions"}:
+            return all(isinstance(item, str) for item in value)
+        return True
 
     @staticmethod
     def _is_compatible_config_value(current: Any, value: Any) -> bool:

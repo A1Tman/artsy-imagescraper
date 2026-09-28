@@ -207,7 +207,7 @@ class ResolvePageAssetUrlTests(unittest.TestCase):
 
 
 class ExtractImagesFromGenericPageTests(unittest.TestCase):
-    def test_generic_extraction_resolves_img_and_background_urls(self) -> None:
+    def test_primary_fallback_chooses_one_image_and_excludes_backgrounds(self) -> None:
         soup = FakeSoup(
             img_srcs=[
                 "../img/pic.jpg",
@@ -236,11 +236,6 @@ class ExtractImagesFromGenericPageTests(unittest.TestCase):
             image_urls,
             {
                 "https://example.com/gallery/img/pic.jpg",
-                "https://example.com/img/root.jpg",
-                "https://example.com/gallery/work/img/local.jpg",
-                "https://cdn.example.com/a.jpg",
-                "https://example.com/gallery/bg/hero.png",
-                "https://cdn.example.com/hero.webp",
             },
         )
 

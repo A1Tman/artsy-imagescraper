@@ -18,6 +18,8 @@ _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 if _MODULE_DIR not in sys.path:
     sys.path.insert(0, _MODULE_DIR)
 from config import ScraperConfig
+from network import PublicNetworkProxy
+from security import redact_text
 
 # ============================================================================
 # Constants
@@ -42,10 +44,17 @@ if not logger.hasHandlers():
 class ResourceManager:
     """Manages resources like WebDriver and HTTP sessions."""
     
-    def __init__(self, config: ScraperConfig):
+    def __init__(self, config: ScraperConfig, cancel_event=None):
         self.config = config
+        self.cancel_event = cancel_event
         self._session: Optional[requests.Session] = None
         self._driver: Optional[webdriver.Chrome] = None
+        self._proxy = None
+
+    def proxy_url(self):
+        if self._proxy is None:
+            self._proxy = PublicNetworkProxy(self.cancel_event, self.config.download_deadline)
+        return self._proxy.url
     
     @contextmanager
     def get_session(self) -> Generator[requests.Session, None, None]:
@@ -53,17 +62,20 @@ class ResourceManager:
         if self._session is None:
             logger.debug("Initializing new HTTP session.")
             self._session = requests.Session()
+            self._session.trust_env = False  # Never attach ambient netrc credentials.
+            self._session.proxies = {'http': self.proxy_url(), 'https': self.proxy_url()}
             self._session.headers.update({
                 'User-Agent': self.config.browser_user_agent,
                 'Accept': HTTP_ACCEPT_VALUE,
                 'Accept-Language': HTTP_ACCEPT_LANGUAGE_VALUE,
                 'Connection': HTTP_CONNECTION_VALUE,
+                'Accept-Encoding': 'identity',
             })
         
         try:
             yield self._session
         except Exception as e:
-            logger.error(f"HTTP Session error: {str(e)}")
+            logger.error("HTTP session failed: %s", type(e).__name__)
             # Optionally, decide if session should be closed and recreated on specific errors
             # For now, we let it be reused unless explicitly closed by close_session or close_all
             raise
@@ -79,6 +91,14 @@ class ResourceManager:
             
             try:
                 options = Options()
+                options.add_argument(f'--proxy-server={self.proxy_url()}')
+                options.add_argument('--proxy-bypass-list=<-loopback>')
+                options.add_argument('--disable-quic')
+                options.add_argument('--force-webrtc-ip-handling-policy=disable_non_proxied_udp')
+                options.add_experimental_option('prefs', {
+                    'download_restrictions': 3,
+                    'profile.default_content_setting_values.automatic_downloads': 2,
+                })
                 
                 if self.config.browser_ignore_cert_errors:
                     options.add_argument('--ignore-certificate-errors')
@@ -114,14 +134,14 @@ class ResourceManager:
                 logger.info("WebDriver initialized successfully.")
                 
             except Exception as e:
-                logger.error(f"Failed to initialize WebDriver: {str(e)}")
+                logger.error("Failed to initialize WebDriver: %s", redact_text(e))
                 self.close_driver() # Attempt cleanup if init fails
                 raise
         
         try:
             yield self._driver
         except Exception as e:
-            logger.error(f"WebDriver operation error: {str(e)}")
+            logger.error("WebDriver operation error: %s", redact_text(e))
             # Don't automatically close driver here, let the main context manager (download_manager) handle it
             raise
     
@@ -154,6 +174,9 @@ class ResourceManager:
         logger.info("Closing all managed resources.")
         self.close_driver()
         self.close_session()
+        if self._proxy:
+            self._proxy.close()
+            self._proxy = None
 
 
 @contextmanager
@@ -161,23 +184,24 @@ def download_manager(
     config: ScraperConfig, 
     # output_dir: str, # output_dir is part of config now
     verbose: bool = False, # Pass verbose for logging within manager
-    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None
+    progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    cancel_event=None,
 ) -> Generator[ResourceManager, None, None]:
     """Context manager for resource handling during scraping."""
     
     # Output directory is now handled by scrape_images using config.output_directory
     # os.makedirs(config.output_directory, exist_ok=True) # Ensure output dir from config exists
     
-    manager = ResourceManager(config)
+    manager = ResourceManager(config, cancel_event)
     
     try:
         if verbose:
             logger.info("Download manager entered.")
         yield manager
     except Exception as e:
-        logger.error(f"Error within download_manager scope: {e}")
+        logger.error("Error within download manager: %s", redact_text(e))
         if progress_callback:
-            progress_callback({'type': 'message', 'value': f"Critical error in download manager: {e}"})
+            progress_callback({'type': 'message', 'value': f"Download error: {redact_text(e)}"})
         raise # Re-raise the exception so scrape_images can catch it
     finally:
         if verbose:
@@ -188,5 +212,5 @@ def download_manager(
         if verbose:
             logger.info("Resources cleaned up by download_manager.")
         
-        if progress_callback:
-            progress_callback({'type': 'message', 'value': "Scraping process finished, resources cleaned up."})
+        # Do not invoke cancellable user callbacks from finally: a new exception
+        # here would mask the original error or successful cleanup.

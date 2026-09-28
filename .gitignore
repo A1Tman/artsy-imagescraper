@@ -40,3 +40,10 @@ htmlcov/
 
 # Exclude archived obsolete files
 archive/
+
+# Local credentials and per-user runtime settings
+.env
+.env.*
+scraper_config.json
+settings.json
+scraper_history.json

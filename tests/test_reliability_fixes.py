@@ -186,6 +186,10 @@ class DownloadLimitTests(unittest.TestCase):
         def __init__(self, chunks, headers):
             self._chunks = chunks
             self.headers = headers
+            self.status_code = 200
+
+        def close(self):
+            pass
 
         def raise_for_status(self) -> None:
             return None

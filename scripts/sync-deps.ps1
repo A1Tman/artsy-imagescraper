@@ -3,4 +3,10 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
 
-python -m pip install -r requirements.txt
+$projectPython = Join-Path $repoRoot '.venv\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $projectPython)) {
+    python -m venv .venv
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+& $projectPython -m pip install -r requirements.txt
+exit $LASTEXITCODE

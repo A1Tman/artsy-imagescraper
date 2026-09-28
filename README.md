@@ -5,7 +5,9 @@ A desktop and command-line tool for downloading high-quality images from Artsy.n
 ## Features
 
 - Scrapes images from Artsy.net using JSON-LD structured data for reliable extraction
-- Downloads original high-resolution images (not scaled-down versions)
+- Selects the main artwork/page image and compares available variants using their actual pixel dimensions
+- Saves one best verified file per selected image, with no upscaling or recompression
+- Validates image files and filters unrelated previews, navigation images and duplicates
 - PyQt5 GUI with progress tracking and download history
 - Command-line interface for scripting and automation
 - Configurable settings for different websites
@@ -27,13 +29,19 @@ cd artsy-imagescraper
 
 Install dependencies:
 ```bash
-pip install -r requirements.txt
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Run the GUI:
-```bash
-python gui.py
+Run the GUI on Windows:
+```powershell
+.\.venv\Scripts\python.exe gui.py
 ```
+
+`python scraper_gui.py` also launches the maintained GUI. Desktop/CLI entry points
+prefer the local `.venv` when present. In VS Code, select `.venv\Scripts\python.exe`
+as the Python interpreter. The global Python installation is not updated.
+On macOS/Linux use `.venv/bin/python` in the corresponding commands.
 
 ## Usage
 
@@ -43,10 +51,32 @@ python gui.py
 3. Choose where to save the images
 4. Use `Check Environment` to compare installed packages against `requirements.txt` when needed
 5. Use `Sync Dependencies` to install the exact pinned dependency set from the lock file
-6. Click `Start Scraping`
-7. Check the Logs tab to monitor progress
+6. Keep `Main image only (best available resolution)` selected for a single artwork. Use `Images in the main content` for a gallery or article with multiple images.
+7. Click `Start Scraping`.
+8. Check the Logs tab for candidate dimensions and the final saved dimensions.
 
-Images are saved to: `{save_location}/{artist_name}/{artwork_title}.jpg`
+Images are saved to `{save_location}/{artist_name}/{artwork_title}.{actual_format}`.
+The downloaded bytes are preserved. A filename such as `large.jpg` does not prove
+that it is the highest-resolution version: the app compares successfully decoded
+candidates and keeps the one with the greatest pixel count. Unavailable originals
+fall back to valid advertised versions. The site may not expose the original file;
+the app does not upscale images, bypass access controls or reconstruct zoom tiles.
+
+Artsy selection uses matching artwork metadata and the artwork image container.
+Generic pages use structured metadata and main/article content, including lazy
+images, `picture`, `srcset` and links to full-size files. Arbitrary preloads and CSS
+backgrounds are excluded. Unusual layouts may need a site-specific adapter.
+
+Only public HTTP(S) destinations on ports 80/443 are supported. Both Chrome and
+image downloads use a local proxy that rejects private/special-use DNS addresses
+and connects to the checked IP, including after redirects. It does not intercept
+TLS. Corporate proxies and private intranet scraping are not supported by this
+configuration. Browser challenges/sign-in pages may prevent scraping.
+
+Downloads have byte, pixel and time limits. The Cancel button interrupts the
+network relay and removes unfinished temporary files. History and logs omit URL
+credentials, query strings and fragments, and log messages are rendered as plain
+text. Limits and `image_selection` can also be configured in `ScraperConfig`.
 
 ### Command-Line Mode
 Run `python scraper.py` for an interactive command-line interface with verbose output.
@@ -58,7 +88,13 @@ artsy-imagescraper/
 ├── scraper.py             # Core scraping engine
 ├── gui.py                 # PyQt5 desktop app
 ├── config.py              # Configuration settings
-├── resources.py           # Resource management (WebDriver, HTTP sessions)
+├── resources.py           # WebDriver and HTTP session lifecycle
+├── image_selection.py     # Page identity and resolution candidates
+├── downloads.py           # Bounded downloads and image validation
+├── network.py             # Public-destination proxy shared by browser and downloader
+├── security.py            # URL validation and redaction
+├── scraper_gui.py         # Compatibility GUI launcher
+├── improved_scraper.py    # Compatibility scraper module
 ├── requirements.in        # Direct runtime dependencies
 ├── requirements.txt       # Pinned runtime lock file
 └── README.md              # This file
@@ -133,6 +169,7 @@ See [CHANGELOG.md](CHANGELOG.md) for full version history.
 - webdriver-manager - ChromeDriver installer
 - PyQt5 - GUI
 - appdirs - Config directories
+- Pillow - Image decoding, validation and actual pixel dimensions
 
 ## Troubleshooting
 
@@ -152,3 +189,18 @@ See [CHANGELOG.md](CHANGELOG.md) for full version history.
 ## License
 
 Educational purposes only. Respect website terms of service and copyright laws.
+
+## Validation
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe -m pip_audit -r requirements.txt --no-deps --disable-pip
+```
+
+Install `pip-audit` in the project environment if needed. Tests use local fixtures
+and controlled loopback servers, not live websites. GitHub Actions runs the suite
+and audits the pinned runtime dependencies. Live validation on 24 September 2026
+selected one 2425 x 3113 JPEG for Artsy's Edvard Munch *Madonna* page, instead of its
+499 x 640 `large.jpg` variant. That result is specific to the publicly available
+files tested, not a guarantee about every site or artwork.

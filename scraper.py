@@ -1,3 +1,7 @@
+if __name__ == "__main__":
+    from launcher import use_project_environment
+    use_project_environment()
+
 import os
 import sys
 import re
@@ -24,6 +28,9 @@ if _SCRIPT_DIR not in sys.path:
 # Import the configuration and resource management classes
 from config import ScraperConfig, domain_matches
 from resources import download_manager, ResourceManager
+from downloads import OperationCancelledError, download_groups, check_cancel
+from image_selection import select_image_groups, unwrap_artsy, srcset_urls, walk_json, image_values
+from security import redact_url, redact_text, validate_url
 
 # ============================================================================
 # Constants
@@ -120,11 +127,6 @@ class ImageCandidate:
     score: int = 0
 
 
-class OperationCancelledError(Exception):
-    """Raised when a scraping operation is cancelled by the user."""
-    pass
-
-
 def clean_filename(name: str) -> str:
     """Convert a string to a valid filename.
 
@@ -144,7 +146,10 @@ def clean_filename(name: str) -> str:
     # Remove trailing dots and spaces (Windows compatibility)
     name = name.strip('. ')
     # Limit length for compatibility
-    return name[:FILENAME_MAX_LENGTH]
+    name = name[:FILENAME_MAX_LENGTH].rstrip('. ')
+    if not name or re.match(r'^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)', name, re.I):
+        name = 'artwork_' + name
+    return name
 
 
 def parse_html_document(html: str) -> BeautifulSoup:
@@ -255,11 +260,13 @@ def extract_json_ld_data(soup: BeautifulSoup, verbose: bool = False) -> List[Dic
 
     for script in script_tags:
         try:
+            if not script.string or len(script.string) > 5_000_000:
+                continue
             data = json.loads(script.string)
             json_ld_data.append(data)
             if verbose:
-                print(f"Found JSON-LD data with @type: {data.get(JSON_LD_TYPE_KEY, 'unknown')}")
-        except (json.JSONDecodeError, AttributeError) as e:
+                print("Found JSON-LD data")
+        except (ValueError, AttributeError, TypeError, RecursionError) as e:
             if verbose:
                 print(f"Error parsing JSON-LD: {e}")
             continue
@@ -284,47 +291,25 @@ def get_nested_value(data: Dict[str, Any], path: str, default: Any = None) -> An
     return current
 
 
-def extract_artsy_info_from_json_ld(json_ld_data: List[Dict[str, Any]], config: ScraperConfig, verbose: bool = False) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    """Extract artist, artwork, and image URL from Artsy JSON-LD data.
-
-    Returns: (artist_name, artwork_title, image_url)
-    """
-    site_config = config.get_site_config(ARTSY_DOMAIN)
-    json_ld_selectors = site_config.get("json_ld_selectors", {})
-
-    artist_path = json_ld_selectors.get("artist_path", "creator.name")
-    artwork_path = json_ld_selectors.get("artwork_path", "name")
-    image_path = json_ld_selectors.get("image_path", "image.url")
-
-    artist_name = None
-    artwork_title = None
-    image_url = None
-
-    # Look through all JSON-LD objects for VisualArtwork type
-    for data in json_ld_data:
-        # Handle @graph structure
-        if JSON_LD_GRAPH_KEY in data:
-            for item in data[JSON_LD_GRAPH_KEY]:
-                if item.get(JSON_LD_TYPE_KEY) == JSON_LD_ARTWORK_TYPE:
-                    artist_name = get_nested_value(item, artist_path)
-                    artwork_title = get_nested_value(item, artwork_path)
-                    image_url = get_nested_value(item, image_path)
-                    if verbose:
-                        print(f"JSON-LD extraction: Artist='{artist_name}', Artwork='{artwork_title}'")
-                    if artist_name and artwork_title:
-                        return artist_name, artwork_title, image_url
-
-        # Handle direct VisualArtwork object
-        elif data.get(JSON_LD_TYPE_KEY) == JSON_LD_ARTWORK_TYPE:
-            artist_name = get_nested_value(data, artist_path)
-            artwork_title = get_nested_value(data, artwork_path)
-            image_url = get_nested_value(data, image_path)
-            if verbose:
-                print(f"JSON-LD extraction: Artist='{artist_name}', Artwork='{artwork_title}'")
-            if artist_name and artwork_title:
-                return artist_name, artwork_title, image_url
-
-    return artist_name, artwork_title, image_url
+def extract_artsy_info_from_json_ld(json_ld_data, config, verbose=False, page_url=None):
+    target = urlparse(page_url).path.rstrip('/') if page_url else None
+    for data in walk_json(json_ld_data):
+        kinds = data.get('@type', [])
+        kinds = [kinds] if isinstance(kinds, str) else kinds
+        if not isinstance(kinds, list) or 'VisualArtwork' not in kinds:
+            continue
+        identity = data.get('url') or data.get('@id')
+        if target and isinstance(identity, str) and urlparse(identity).path.rstrip('/') != target:
+            continue
+        creator = data.get('creator') or data.get('artist')
+        if isinstance(creator, list):
+            creator = creator[0] if creator else None
+        artist = creator.get('name') if isinstance(creator, dict) else creator
+        title = data.get('name')
+        images = image_values(data.get('image'))
+        if isinstance(artist, str) and isinstance(title, str):
+            return artist, title, images[0] if images else None
+    return None, None, None
 
 
 def extract_artsy_info(url: str, driver: webdriver.Chrome, config: ScraperConfig, verbose: bool = False) -> Tuple[str, str]:
@@ -359,7 +344,7 @@ def extract_artsy_info(url: str, driver: webdriver.Chrome, config: ScraperConfig
             json_ld_data = extract_json_ld_data(soup, verbose)
 
             if json_ld_data:
-                artist_name, artwork_title, _ = extract_artsy_info_from_json_ld(json_ld_data, config, verbose)
+                artist_name, artwork_title, _ = extract_artsy_info_from_json_ld(json_ld_data, config, verbose, page_url=url)
                 if artist_name and artwork_title:
                     if verbose:
                         print(f"JSON-LD extraction successful: Artist='{artist_name}', Artwork='{artwork_title}'")
@@ -426,52 +411,12 @@ def extract_generic_info(url: str, driver: webdriver.Chrome, config: ScraperConf
 # def setup_webdriver... # This function is removed, ResourceManager handles it.
 
 def extract_original_image_url(cdn_url: str, config: ScraperConfig, verbose: bool = False) -> str:
-    """Extract the original image URL from Artsy's CDN URL.
-
-    Artsy wraps images in CDN URLs like:
-    https://d7hftxdivxxvm.cloudfront.net?resize_to=fit&src=https%3A%2F%2Fd32dm0rphc51dk.cloudfront.net%2Fw1lhovVBCZMKBWMtqxH2fQ%2Flarge.jpg&width=1289
-
-    This extracts the 'src' parameter which is the actual image URL.
-    """
-    site_config = config.get_site_config(ARTSY_DOMAIN)
-    cdn_patterns = site_config.get("cdn_patterns", [r'resize_to=fit&src=([^&]+)', r'src=([^&]+)'])
-
-    decoded_url = unquote(cdn_url)
-
-    for pattern in cdn_patterns:
-        match = re.search(pattern, decoded_url)
-        if match:
-            extracted_url = unquote(match.group(1))  # Double decode in case it's encoded twice
-            if verbose:
-                print(f"Extracted original URL: {extracted_url}")
-            return extracted_url
-
-    # If no pattern matches, return the original URL
-    return cdn_url
+    return unwrap_artsy(cdn_url)
 
 
 def parse_srcset_urls(srcset: str, page_url: str) -> List[Tuple[int, str]]:
-    """Parse a srcset attribute into width-scored absolute URLs."""
-    candidates: List[Tuple[int, str]] = []
-    for item in srcset.split(','):
-        parts = item.strip().split()
-        if not parts:
-            continue
-
-        resolved_url = resolve_page_asset_url(page_url, parts[0])
-        if not resolved_url:
-            continue
-
-        width = 0
-        if len(parts) > 1 and parts[1].endswith('w'):
-            try:
-                width = int(parts[1][:-1])
-            except ValueError:
-                width = 0
-
-        candidates.append((width, resolved_url))
-
-    return candidates
+    urls = srcset_urls(srcset, page_url)
+    return [(len(urls) - index, url) for index, url in enumerate(urls)]
 
 
 def resolve_page_asset_url(page_url: str, raw_url: str) -> Optional[str]:
@@ -599,131 +544,10 @@ def dedupe_generic_urls(urls: Set[str]) -> Set[str]:
     return set(best_urls.values())
 
 
-def extract_images_from_page(soup: BeautifulSoup, url: str, site_type: str, config: ScraperConfig, driver: Optional[webdriver.Chrome] = None, verbose: bool = False) -> Set[str]:
-    """Extract image URLs from the page based on site type and config.
-
-    Args:
-        soup: BeautifulSoup object containing parsed HTML
-        url: Source URL being scraped
-        site_type: Type of site ("artsy" or "generic")
-        config: Scraper configuration object
-        driver: Optional Selenium WebDriver instance (unused but kept for API compatibility)
-        verbose: Enable verbose logging
-
-    Returns:
-        Set of image URLs found on the page
-    """
-    unique_urls = set()
-    parsed_url_netloc = urlparse(url).netloc
-    site_specific_config = config.get_site_config(parsed_url_netloc)
-    unwanted_terms = site_specific_config.get('unwanted_image_terms_override', config.unwanted_image_terms)
-
-    if site_type == SITE_TYPE_ARTSY:
-        artsy_candidates: List[ImageCandidate] = []
-
-        # Strategy 1: Try JSON-LD first (best quality)
-        if site_specific_config.get("use_json_ld", True):
-            json_ld_data = extract_json_ld_data(soup, verbose)
-            if json_ld_data:
-                _, _, image_url = extract_artsy_info_from_json_ld(json_ld_data, config, verbose)
-                if image_url:
-                    # Extract original URL from CDN wrapper
-                    original_url = extract_original_image_url(image_url, config, verbose)
-                    artsy_candidates.append(ImageCandidate(original_url, 'json_ld', score_artsy_candidate(original_url, 'json_ld')))
-                    if verbose:
-                        print(f"Added image from JSON-LD: {original_url}")
-
-        # Strategy 2: Look for preload links (high-quality images)
-        preload_links = soup.find_all('link', rel='preload', attrs={'as': 'image'})
-        for link in preload_links:
-            if 'href' in link.attrs:
-                img_url = link['href']
-                original_url = extract_original_image_url(img_url, config, verbose)
-                if not contains_unwanted_image_term(original_url, unwanted_terms):
-                    artsy_candidates.append(ImageCandidate(original_url, 'preload', score_artsy_candidate(original_url, 'preload')))
-                    if verbose:
-                        print(f"Added image from preload link: {original_url}")
-
-        # Strategy 3: Look for meta tags with images
-        meta_images = soup.find_all('meta', property='og:image')
-        for meta in meta_images:
-            if 'content' in meta.attrs:
-                img_url = meta['content']
-                original_url = extract_original_image_url(img_url, config, verbose)
-                if not contains_unwanted_image_term(original_url, unwanted_terms):
-                    artsy_candidates.append(ImageCandidate(original_url, 'meta', score_artsy_candidate(original_url, 'meta')))
-                    if verbose:
-                        print(f"Added image from og:image meta tag: {original_url}")
-
-        # Strategy 4: Parse img tags as fallback
-        if not artsy_candidates:
-            img_tags = soup.find_all('img')
-            for img in img_tags:
-                if 'src' in img.attrs:
-                    src = img['src']
-                    original_url = extract_original_image_url(src, config, verbose)
-                    if not contains_unwanted_image_term(original_url, unwanted_terms):
-                        artsy_candidates.append(ImageCandidate(original_url, 'img', score_artsy_candidate(original_url, 'img')))
-
-        unique_urls = dedupe_artsy_candidates(artsy_candidates)
-
-    else: # Generic site
-        for attr_name, attr_value in GENERIC_IMAGE_META_ATTRS:
-            meta_image_url = extract_meta_content(soup, attr_name, attr_value)
-            resolved_meta_url = resolve_page_asset_url(url, meta_image_url) if meta_image_url else None
-            if resolved_meta_url:
-                unique_urls.add(resolved_meta_url)
-
-        preload_links = soup.find_all('link', rel='preload', attrs={'as': 'image'})
-        for link in preload_links:
-            resolved_link_url = resolve_page_asset_url(url, link.get('href', ''))
-            if resolved_link_url:
-                unique_urls.add(resolved_link_url)
-
-        found_structured_candidate = bool(unique_urls)
-
-        source_tags = soup.find_all('source')
-        for source in source_tags:
-            srcset = source.get('srcset', '')
-            parsed_srcset_urls = parse_srcset_urls(srcset, url)
-            if parsed_srcset_urls:
-                unique_urls.add(max(parsed_srcset_urls, key=lambda candidate: candidate[0])[1])
-                found_structured_candidate = True
-
-        img_tags = soup.find_all('img')
-        for img in img_tags:
-            srcset = img.get('srcset', '')
-            parsed_srcset_urls = parse_srcset_urls(srcset, url)
-            if parsed_srcset_urls:
-                unique_urls.add(max(parsed_srcset_urls, key=lambda candidate: candidate[0])[1])
-                found_structured_candidate = True
-                continue
-
-            if found_structured_candidate:
-                continue
-
-            if 'src' in img.attrs:
-                src = resolve_page_asset_url(url, img['src'])
-                if not src:
-                    continue
-                if urlparse(src).path.lower().endswith('.svg'):
-                    continue
-                unique_urls.add(src)
-                
-        elements_with_style = soup.select('[style*="background-image"]')
-        for element in elements_with_style:
-            style = element.get('style', '')
-            found_style_urls = re.findall(r'url\([\'"]?(.*?)[\'"]?\)', style)
-            for img_url_style in found_style_urls:
-                resolved_style_url = resolve_page_asset_url(url, img_url_style)
-                if resolved_style_url:
-                    unique_urls.add(resolved_style_url)
-
-        filtered_urls = {iu for iu in unique_urls if not contains_unwanted_image_term(iu, unwanted_terms)}
-        unique_urls = dedupe_generic_urls(filtered_urls)
-    
-    if verbose: print(f"Found {len(unique_urls)} potential image URLs after filtering")
-    return unique_urls
+def extract_images_from_page(soup: BeautifulSoup, url: str, site_type: str, config: ScraperConfig, driver=None, verbose=False) -> Set[str]:
+    """Compatibility helper returning the first candidate for each selected image."""
+    groups = select_image_groups(soup, url, config, artsy=site_type == SITE_TYPE_ARTSY)
+    return {group.urls[0] for group in groups if group.urls}
 
 
 def parse_content_length(content_length_header: Optional[str]) -> Optional[int]:
@@ -739,146 +563,25 @@ def parse_content_length(content_length_header: Optional[str]) -> Optional[int]:
     return content_length if content_length >= 0 else None
 
 
-def download_images(unique_urls: Set[str], artist_dir: str, artwork_name: str, config: ScraperConfig, manager: ResourceManager, verbose: bool = False, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None) -> int:
-    """Download images using ResourceManager for session and config for settings.
-
-    Args:
-        unique_urls: Set of image URLs to download
-        artist_dir: Directory path where images should be saved
-        artwork_name: Base filename for saved images
-        config: Scraper configuration object
-        manager: ResourceManager instance for HTTP session
-        verbose: Enable verbose logging
-        progress_callback: Optional callback function for progress updates
-
-    Returns:
-        Number of images successfully downloaded
-    """
-    num_images_downloaded = 0
-    total_to_download = len(unique_urls)
-
-    with manager.get_session() as session: # Use session from ResourceManager
-        for i, img_url in enumerate(unique_urls):
-            image_path = None
-            try:
-                with session.get(img_url, timeout=config.download_timeout, stream=True) as response:
-                    response.raise_for_status()
-
-                    content_type_header = response.headers.get('content-type', '').lower()
-                    content_length = parse_content_length(response.headers.get('content-length'))
-                    file_extension = DEFAULT_IMAGE_EXTENSION
-
-                    # Map content type to extension
-                    for content_type, ext in IMAGE_CONTENT_TYPES.items():
-                        if content_type in content_type_header:
-                            file_extension = ext
-                            break
-                    else:
-                        # If no content type match, try to get extension from URL
-                        path_ext = os.path.splitext(urlparse(img_url).path)[1].lower()
-                        if path_ext in config.preferred_extensions:
-                            file_extension = path_ext
-
-                    image_path = os.path.join(artist_dir, artwork_name + file_extension)
-                    counter = 1
-                    base_name_for_path = artwork_name
-                    while os.path.exists(image_path):
-                        image_path = os.path.join(artist_dir, f"{base_name_for_path}_{counter}{file_extension}")
-                        counter += 1
-
-                    if not content_type_header.startswith('image/'):
-                        msg = f"Skipping non-image response (Type: {content_type_header}): {os.path.basename(img_url)}"
-                        if verbose: print(msg)
-                        if progress_callback: progress_callback({'type': 'message', 'value': msg})
-                        continue
-
-                    if content_length is not None and content_length < config.min_image_size:
-                        msg = (
-                            f"Skipping small image from headers (Type: {content_type_header}, "
-                            f"Size: {content_length}): {os.path.basename(img_url)}"
-                        )
-                        if verbose: print(msg)
-                        if progress_callback: progress_callback({'type': 'message', 'value': msg})
-                        continue
-
-                    if content_length is not None and content_length > config.max_download_size:
-                        msg = (
-                            f"Skipping oversized image from headers (Size: {content_length}, "
-                            f"Limit: {config.max_download_size}): {os.path.basename(img_url)}"
-                        )
-                        if verbose: print(msg)
-                        if progress_callback: progress_callback({'type': 'message', 'value': msg})
-                        continue
-
-                    bytes_downloaded = 0
-                    with open(image_path, "wb") as file:
-                        for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
-                            if not chunk:
-                                continue
-
-                            bytes_downloaded += len(chunk)
-                            if bytes_downloaded > config.max_download_size:
-                                raise ValueError(
-                                    f"Download exceeded max size ({bytes_downloaded} > {config.max_download_size})"
-                                )
-
-                            file.write(chunk)
-
-                    if bytes_downloaded < config.min_image_size:
-                        if os.path.exists(image_path):
-                            os.remove(image_path)
-                        msg = (
-                            f"Skipping small/non-image (Type: {content_type_header}, "
-                            f"Size: {bytes_downloaded}): {os.path.basename(img_url)}"
-                        )
-                        if verbose: print(msg)
-                        if progress_callback: progress_callback({'type': 'message', 'value': msg})
-                        continue
-
-                num_images_downloaded += 1
-
-                dl_msg = f"DL {os.path.basename(image_path)} ({i+1}/{total_to_download})"
-                if verbose: print(dl_msg)
-                if progress_callback:
-                    percentage = int(((i + 1) / total_to_download) * 100) if total_to_download else 100
-                    progress_callback({'type': 'percentage', 'value': percentage})
-                    progress_callback({'type': 'message', 'value': dl_msg})
-                    
-            except requests.exceptions.RequestException as e:
-                if image_path and os.path.exists(image_path):
-                    os.remove(image_path)
-                err_msg = f"Error DL {img_url}: {e}"
-                if verbose: print(err_msg)
-                if progress_callback: progress_callback({'type': 'message', 'value': err_msg})
-            except ValueError as e:
-                if image_path and os.path.exists(image_path):
-                    os.remove(image_path)
-                err_msg = f"Skipping oversized image during download: {img_url} ({e})"
-                if verbose: print(err_msg)
-                if progress_callback: progress_callback({'type': 'message', 'value': err_msg})
-            except Exception as e:
-                if image_path and os.path.exists(image_path):
-                    os.remove(image_path)
-                err_msg = f"Error with {img_url}: {e}"
-                if verbose: print(err_msg)
-                if progress_callback: progress_callback({'type': 'message', 'value': err_msg})
-                    
-    return num_images_downloaded
+def download_images(unique_urls, artist_dir, artwork_name, config, manager, verbose=False, progress_callback=None, cancel_event=None):
+    return download_groups(unique_urls, artist_dir, artwork_name, config, manager,
+                           verbose, progress_callback, cancel_event)
 
 
-def scrape_images(url: str, config_input: Optional[Union[ScraperConfig, str]] = None, verbose: bool = False, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None):
+def scrape_images(url: str, config_input: Optional[Union[ScraperConfig, str]] = None, verbose: bool = False, progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None, cancel_event=None):
     """Unified scraper using ScraperConfig and ResourceManager."""
     
     if isinstance(config_input, ScraperConfig): config = config_input
     elif isinstance(config_input, str): config = ScraperConfig.load(config_input)
     else: config = ScraperConfig.load() 
-    if verbose: print(f"Using configuration: {config}")
+    validate_url(url)
+    check_cancel(cancel_event)
 
     directory_name = config.output_directory # This is the base output directory from config
     num_images_downloaded = 0
     
     # download_manager will handle resource cleanup (driver, session)
-    with download_manager(config, verbose=verbose, progress_callback=progress_callback) as manager:
+    with download_manager(config, verbose=verbose, progress_callback=progress_callback, cancel_event=cancel_event) as manager:
         try:
             if not os.path.exists(directory_name):
                 os.makedirs(directory_name)
@@ -887,7 +590,7 @@ def scrape_images(url: str, config_input: Optional[Union[ScraperConfig, str]] = 
                 if progress_callback: progress_callback({'type': 'message', 'value': msg})
             
             parsed_url = urlparse(url)
-            domain = parsed_url.netloc
+            domain = parsed_url.hostname or ""
             site_type = SITE_TYPE_ARTSY if is_artsy_domain(domain) else SITE_TYPE_GENERIC
             
             msg = f"Detected site type: {site_type} for domain: {domain}"
@@ -896,13 +599,20 @@ def scrape_images(url: str, config_input: Optional[Union[ScraperConfig, str]] = 
             
             # WebDriver is now obtained via the manager's context manager
             with manager.get_driver(verbose=verbose) as driver:
-                msg = f"Loading page: {url}..."
+                msg = f"Loading page: {redact_url(url)}..."
                 if verbose: print(msg)
                 if progress_callback: progress_callback({'type': 'message', 'value': msg})
                 driver.get(url) # Page load timeout is set in get_driver
                 
                 if verbose: print(f"Waiting {config.render_wait_time}s for page to render...")
-                time.sleep(config.render_wait_time)
+                if cancel_event is not None:
+                    cancel_event.wait(config.render_wait_time)
+                else:
+                    time.sleep(config.render_wait_time)
+                check_cancel(cancel_event)
+                url = driver.current_url
+                validate_url(url)
+                site_type = SITE_TYPE_ARTSY if is_artsy_domain(urlparse(url).hostname or "") else SITE_TYPE_GENERIC
                 
                 if site_type == SITE_TYPE_ARTSY:
                     artist_name, artwork_title = extract_artsy_info(url, driver, config, verbose)
@@ -932,14 +642,18 @@ def scrape_images(url: str, config_input: Optional[Union[ScraperConfig, str]] = 
                 html = driver.page_source
                 soup = parse_html_document(html)
                 
-                unique_urls = extract_images_from_page(soup, url, site_type, config, driver, verbose)
-                msg = f"Found {len(unique_urls)} potential image URLs."
+                unique_urls = select_image_groups(soup, url, config, artsy=site_type == SITE_TYPE_ARTSY)
+                if not unique_urls:
+                    raise ValueError("No main image was found. The page may require sign-in or browser verification, or use an unsupported image layout.")
+                msg = f"Selected {len(unique_urls)} image(s); checking their available resolutions."
                 if verbose: print(msg)
                 if progress_callback: progress_callback({'type': 'message', 'value': msg})
                 
                 if progress_callback: progress_callback({'type': 'message', 'value': "Starting image downloads..."})
                 # Pass the manager to download_images so it can use the session
-                num_images_downloaded = download_images(unique_urls, artist_dir, artwork_title_clean, config, manager, verbose, progress_callback)
+                num_images_downloaded = download_images(unique_urls, artist_dir, artwork_title_clean, config, manager, verbose, progress_callback, cancel_event)
+                if not num_images_downloaded:
+                    raise ValueError("No selected image could be downloaded and verified. See the candidate results in the log.")
             
             # Driver is automatically closed here by exiting the `with manager.get_driver()` context
             msg = f"Total number of images downloaded: {num_images_downloaded}"
@@ -951,11 +665,12 @@ def scrape_images(url: str, config_input: Optional[Union[ScraperConfig, str]] = 
         except OperationCancelledError:
             raise  # Re-raise without wrapping so callers can detect cancellation cleanly
         except Exception as e:
-            err_msg = f"Error during scraping: {str(e)}"
+            check_cancel(cancel_event)
+            err_msg = f"Error during scraping: {redact_text(e)}"
             if verbose: print(err_msg)
             if progress_callback: progress_callback({'type': 'message', 'value': err_msg})
             # The download_manager's finally block will still run for cleanup
-            raise Exception(f"Failed to scrape images: {str(e)}") from e
+            raise Exception(f"Failed to scrape images: {redact_text(e)}") from e
         # No explicit finally block for driver.quit() needed here, download_manager handles it.
 
 

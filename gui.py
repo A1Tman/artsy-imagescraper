@@ -1,10 +1,14 @@
+if __name__ == "__main__":
+    from launcher import use_project_environment
+    use_project_environment()
+
 import sys
 import os
 import threading
 import subprocess
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, 
                             QPushButton, QLineEdit, QLabel, QWidget, QFileDialog, 
-                            QProgressBar, QMessageBox, QTextEdit, QGroupBox, 
+                            QProgressBar, QMessageBox, QPlainTextEdit, QComboBox, QGroupBox, 
                             QTabWidget, QListWidget)
 from PyQt5.QtGui import QFont, QTextCursor
 from PyQt5.QtCore import Qt, pyqtSignal, QObject
@@ -24,6 +28,8 @@ _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 if _MODULE_DIR not in sys.path:
     sys.path.insert(0, _MODULE_DIR)
 from config import ScraperConfig
+from security import redact_url, redact_text, validate_url
+from html import escape
 
 # Progress update dictionary keys and values
 PROG_TYPE = 'type'
@@ -249,16 +255,7 @@ def is_same_or_child_path(path: str, parent_path: str) -> bool:
 
 def sanitize_history_url(url: str) -> str:
     """Strip query, params, and fragments before persisting URLs to history."""
-    candidate = url.strip()
-    try:
-        parsed = urlparse(candidate)
-    except Exception:
-        return candidate
-
-    if parsed.scheme not in VALID_URL_SCHEMES or not parsed.netloc:
-        return candidate
-
-    return parsed._replace(params="", query="", fragment="").geturl()
+    return redact_url(url)
 
 
 def sanitize_history_item_text(item_text: str) -> str:
@@ -298,9 +295,11 @@ class ScraperThread(threading.Thread):
         self.config: ScraperConfig = config
         self.signals: WorkerSignals = WorkerSignals()
         self.cancel_requested: bool = False
+        self.cancel_event = threading.Event()
 
     def request_cancel(self) -> None:
         self.cancel_requested = True
+        self.cancel_event.set()
 
     def handle_scraper_progress(self, progress_data: Any) -> None:
         if self.cancel_requested:
@@ -318,7 +317,8 @@ class ScraperThread(threading.Thread):
                 url=self.url,
                 config_input=self.config,
                 verbose=False,
-                progress_callback=self.handle_scraper_progress
+                progress_callback=self.handle_scraper_progress,
+                cancel_event=self.cancel_event,
             )
             if not self.cancel_requested:
                 self.signals.finished.emit(result)
@@ -461,6 +461,10 @@ class ImageScraperApp(QMainWindow):
         self.url_input.setStyleSheet("QLineEdit {padding: 10px; border: 1px solid #BDC3C7; border-radius: 4px;} QLineEdit:focus {border: 1px solid #3498DB;}")
         self.url_input.textChanged.connect(self.validate_url_input_live) # Live validation
         url_layout.addWidget(self.url_input)
+        self.image_selection = QComboBox()
+        self.image_selection.addItem("Main image only (best available resolution)", "primary")
+        self.image_selection.addItem("Images in the main content", "content")
+        url_layout.addWidget(self.image_selection)
 
         self.url_warning_label = QLabel(URL_WARNING_MESSAGE)
         self.url_warning_label.setStyleSheet(f"color: {COLOR_RED}; font-size: {SMALL_FONT_SIZE}px; margin-left: 4px;")
@@ -496,7 +500,8 @@ class ImageScraperApp(QMainWindow):
         # Log Tab
         log_tab = QWidget()
         log_layout = QVBoxLayout()
-        self.log_output = QTextEdit()
+        self.log_output = QPlainTextEdit()
+        self.log_output.setMaximumBlockCount(3000)
         self.log_output.setReadOnly(True)
         self.log_output.setFont(QFont('Courier New', 9))
         log_layout.addWidget(self.log_output)
@@ -532,6 +537,7 @@ class ImageScraperApp(QMainWindow):
         # Status Label and Progress Bar
         status_layout = QHBoxLayout()
         self.status_label = QLabel('Ready')
+        self.status_label.setTextFormat(Qt.PlainText)
         self.status_label.setFont(QFont(FONT_ARIAL, 10))
         status_layout.addWidget(self.status_label, 1) # Give it more space
 
@@ -655,8 +661,8 @@ class ImageScraperApp(QMainWindow):
 
     def is_valid_url(self, url: str) -> bool:
         try:
-            parsed = urlparse(url)
-            return parsed.scheme in VALID_URL_SCHEMES and bool(parsed.netloc) and '.' in parsed.netloc
+            validate_url(url)
+            return True
         except Exception:
             return False
 
@@ -726,7 +732,7 @@ class ImageScraperApp(QMainWindow):
     def add_log_message(self, message: str, timestamp: bool = True) -> None:
         now = datetime.now().strftime(LOG_TIME_FORMAT) if timestamp else ""
         prefix = f"[{now}] " if timestamp else ""
-        self.log_output.append(f"{prefix}{message}")
+        self.log_output.appendPlainText(f"{prefix}{redact_text(message)}")
         self.log_output.moveCursor(QTextCursor.End)
 
     def add_to_history(self, url: str, count: int) -> None:
@@ -748,7 +754,7 @@ class ImageScraperApp(QMainWindow):
         history_file = self._get_history_file_path()
         history_data = []
         for i in range(self.history_list.count()):
-            history_data.append(self.history_list.item(i).text())
+            history_data.append(sanitize_history_item_text(self.history_list.item(i).text()))
         try:
             with open(history_file, 'w', encoding='utf-8') as f:
                 json.dump(history_data, f, indent=4)
@@ -959,6 +965,9 @@ class ImageScraperApp(QMainWindow):
         Validates paths and creates scraper thread with progress callbacks.
         """
         url = self.url_input.text().strip()
+        if not self.is_valid_url(url):
+            QMessageBox.warning(self, "Invalid URL", "Enter a public HTTP(S) page URL without credentials.")
+            return
         save_dir = self.save_dir_input.text().strip()
 
         if not save_dir:
@@ -1018,6 +1027,7 @@ class ImageScraperApp(QMainWindow):
 
         thread_config = copy.deepcopy(self.scraper_config)
         thread_config.output_directory = save_dir
+        thread_config.image_selection = self.image_selection.currentData()
 
         self.scraper_thread = ScraperThread(url, thread_config)
         self.scraper_thread.signals.progress.connect(self.update_ui_progress)
@@ -1032,9 +1042,9 @@ class ImageScraperApp(QMainWindow):
         self.status_label.setText(final_message)
         self.add_log_message(f"\nScraping completed successfully! Total images downloaded: {count}", timestamp=False)
         if count > 0:
-            self.add_to_history(self.url_input.text().strip(), count)
+            self.add_to_history(self.scraper_thread.url, count)
         self.operation_common_finish_ui()
-        QMessageBox.information(self, "Scraping Complete", f"{final_message}\nSaved to: {self.save_dir_input.text()}")
+        QMessageBox.information(self, "Scraping Complete", f"{final_message}\nSaved to: {self.scraper_thread.config.output_directory}")
 
     def scraping_cancelled(self, message: str) -> None:
         self.status_label.setText(message)
@@ -1046,7 +1056,7 @@ class ImageScraperApp(QMainWindow):
         self.status_label.setText(f'Error during {op_name}!')
         self.add_log_message(f"\nERROR during {op_name}: {error_message}", timestamp=False)
         self.operation_common_finish_ui()
-        QMessageBox.critical(self, f"{op_name} Error", f"An error occurred:\n\n{error_message}")
+        QMessageBox.critical(self, f"{op_name} Error", f"An error occurred:\n\n{escape(redact_text(error_message))}")
 
     def cancel_operation(self) -> None:
         if self.active_operation == "scraping" and self.scraper_thread and self.scraper_thread.is_alive():
