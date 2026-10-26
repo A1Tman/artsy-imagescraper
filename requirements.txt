@@ -16,8 +16,6 @@ certifi==2026.7.22
     # via
     #   requests
     #   selenium
-cffi==2.1.1
-    # via trio
 charset-normalizer==3.5.1
     # via requests
 h11==0.16.0
@@ -34,10 +32,8 @@ outcome==1.3.0.post0
     #   trio-websocket
 packaging==26.3
     # via webdriver-manager
-pillow==12.3.0
+pillow==13.0.0
     # via -r requirements.in
-pycparser==3.0
-    # via cffi
 pyqt5==5.15.11
     # via -r requirements.in
 pyqt5-qt5==5.15.2
@@ -52,7 +48,7 @@ requests==2.34.2
     # via
     #   -r requirements.in
     #   webdriver-manager
-selenium==4.49.0
+selenium==4.51.0
     # via -r requirements.in
 sniffio==1.3.1
     # via trio
