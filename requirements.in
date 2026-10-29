@@ -1,5 +1,8 @@
 appdirs
 beautifulsoup4
+# Trio needs cffi on Windows. Keep it explicit so Linux-based Dependabot
+# also locks cffi and its pycparser dependency for Windows installs and audits.
+cffi
 lxml
 Pillow
 PyQt5
