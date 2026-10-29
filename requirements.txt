@@ -12,15 +12,13 @@ attrs==26.1.0
     #   trio
 beautifulsoup4==4.15.0
     # via -r requirements.in
-certifi==2026.10.19
+certifi==2026.10.23
     # via
     #   requests
     #   selenium
 cffi==2.1.1
-    # via
-    #   -r requirements.in
-    #   trio
-charset-normalizer==3.5.1
+    # via -r requirements.in
+charset-normalizer==3.5.2
     # via requests
 h11==0.16.0
     # via wsproto
@@ -42,13 +40,13 @@ pycparser==3.12
     # via cffi
 pyqt5==5.15.11
     # via -r requirements.in
-pyqt5-qt5==5.15.2
+pyqt5-qt5==5.15.19
     # via pyqt5
-pyqt5-sip==12.19.0
+pyqt5-sip==12.20.0
     # via pyqt5
 pysocks==1.7.1
     # via urllib3
-python-dotenv==1.2.3
+python-dotenv==1.2.4
     # via webdriver-manager
 requests==2.34.2
     # via
@@ -60,7 +58,7 @@ sniffio==1.3.1
     # via trio
 sortedcontainers==2.4.0
     # via trio
-soupsieve==2.10
+soupsieve==3.0.4
     # via beautifulsoup4
 trio==0.34.0
     # via
