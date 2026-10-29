@@ -16,6 +16,10 @@ certifi==2026.10.19
     # via
     #   requests
     #   selenium
+cffi==2.1.1
+    # via
+    #   -r requirements.in
+    #   trio
 charset-normalizer==3.5.1
     # via requests
 h11==0.16.0
@@ -34,6 +38,8 @@ packaging==26.3
     # via webdriver-manager
 pillow==13.0.0
     # via -r requirements.in
+pycparser==3.12
+    # via cffi
 pyqt5==5.15.11
     # via -r requirements.in
 pyqt5-qt5==5.15.2
