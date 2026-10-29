@@ -3,11 +3,11 @@ updates:
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
+      interval: "daily"
       time: "06:00"
       timezone: "Europe/Oslo"
-    target-branch: "main"
+    allow:
+      - dependency-type: "all"
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
@@ -15,5 +15,20 @@ updates:
       - "dependencies"
     groups:
       python-dependencies:
+        patterns:
+          - "*"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Oslo"
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"
+    groups:
+      github-actions:
         patterns:
           - "*"
