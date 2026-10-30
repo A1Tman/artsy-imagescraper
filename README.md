@@ -16,7 +16,7 @@ A desktop and command-line tool for downloading high-quality images from Artsy.n
 ## Installation
 
 ### Prerequisites
-- Python 3.11 or higher
+- Python 3.11.5 or higher
 - Google Chrome browser (for Selenium WebDriver)
 
 ### Setup
