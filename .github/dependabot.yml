@@ -8,6 +8,10 @@ updates:
       timezone: "Europe/Oslo"
     allow:
       - dependency-type: "all"
+    ignore:
+      # This release has no Windows wheel; Windows CI requires 5.15.2.
+      - dependency-name: "pyqt5-qt5"
+        versions: ["5.15.19"]
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
