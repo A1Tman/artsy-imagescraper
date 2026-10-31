@@ -9,9 +9,10 @@ updates:
     allow:
       - dependency-type: "all"
     ignore:
-      # This release has no Windows wheel; Windows CI requires 5.15.2.
+      # Published Qt 5.15.11-5.15.19 wheels do not support Windows.
+      # Keep future releases eligible for updates; Windows CI checks compatibility.
       - dependency-name: "pyqt5-qt5"
-        versions: ["5.15.19"]
+        versions: [">=5.15.11,<=5.15.19"]
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
